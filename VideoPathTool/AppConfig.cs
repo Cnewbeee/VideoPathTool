@@ -18,6 +18,15 @@ public class AppConfig
     /// <summary>yt-dlp executable. Empty means "search the usual places".</summary>
     public string YtDlpPath { get; set; } = AppPaths.YtDlpPath;
 
+    /// <summary>ffmpeg executable, used to merge audio and to build preview proxies.</summary>
+    public string FfmpegPath { get; set; } = "ffmpeg";
+
+    /// <summary>
+    /// When a fresh <c>&lt;name&gt;.proxy.mp4</c> exists next to the video, the
+    /// editor previews that instead. Recording always reads the original.
+    /// </summary>
+    public bool UsePreviewProxy { get; set; } = true;
+
     /// <summary>Root that holds one folder per route (see <see cref="AppPaths"/>).</summary>
     public string RouteDir { get; set; } = AppPaths.RouteDir;
 

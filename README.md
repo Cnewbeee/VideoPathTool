@@ -37,6 +37,9 @@ individual moments before exporting a JSON that BetterGI can execute.
 - **Resume editing.** One folder per video keeps the export, the recorded
   samples and the editor state together, so re-exporting never needs the video
   again.
+- **A preview proxy for slow codecs.** AV1 footage decodes at ~85 ms per frame
+  in software, which makes scrubbing take seconds; one ffmpeg pass produces an
+  H.264 copy that seeks 15x faster. Recording still reads the original.
 - **Link → route.** Paste a Bilibili/YouTube link and the tool downloads it
   (yt-dlp), detects the minimap circle, records and exports in one go.
 

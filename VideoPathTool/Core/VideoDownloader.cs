@@ -394,7 +394,11 @@ public static class VideoDownloader
         // frame cost ~85 ms and a seek ~2 s (a full keyframe interval), which
         // makes both recording and scrubbing in the editor crawl. The picture
         // quality difference is irrelevant for map matching.
-        psi.ArgumentList.Add("bv*[vcodec^=avc1]/bv*[vcodec^=avc]/bv*/b");
+        //
+        // The audio track is kept: it costs little and makes reviewing the
+        // route much easier. Video-only stays as the fallback for sources that
+        // cannot be muxed without ffmpeg.
+        psi.ArgumentList.Add("bv*[vcodec^=avc1]+ba/b[vcodec^=avc1]+ba/bv*+ba/bv*[vcodec^=avc1]/bv*");
         psi.ArgumentList.Add("--merge-output-format");
         psi.ArgumentList.Add("mp4");
         psi.ArgumentList.Add("-o");

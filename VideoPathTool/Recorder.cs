@@ -241,7 +241,9 @@ public class Recorder
             {
                 lastProgressSec = timeSec;
                 var elapsed = sw.Elapsed;
-                _log($"[进度] 视频 {timeSec:F0}s / {(endFrame / fps):F0}s | 采样 {stats.SampledFrames} 成功 {stats.MatchedFrames} 失败 {stats.FailedFrames} | 已用 {elapsed.TotalSeconds:F0}s");
+                _log($"[进度] 视频 {timeSec:F0}s / {(endFrame / fps):F0}s | " +
+                     $"采样 {stats.SampledFrames}（成功 {stats.MatchedFrames} 失败 {stats.FailedFrames} " +
+                     $"无效 {stats.InvalidFrames}）| 已用 {elapsed.TotalSeconds:F0}s");
             }
 
             // A UI wants a steady stream of small updates; the console only

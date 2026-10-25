@@ -231,6 +231,11 @@ public partial class MainWindow : Window
     private bool _suppressSliderCallback;
     private double? _glideMarkStart;
 
+    // ---- audio (OpenCV decodes no sound, so MediaPlayer plays it) ----
+    private readonly MediaPlayer _audio = new();
+    private bool _audioAvailable;
+    private int _audioResyncTick;
+
     // ---- background scrubbing ----
     // Seeking costs about one keyframe interval of decoding; doing it on the UI
     // thread froze the window, and queuing one seek per slider tick made it take
@@ -1286,6 +1291,21 @@ public partial class MainWindow : Window
     // ============================================================ 视频播放与标定
 
     /// <summary>
+    /// The file the editor previews. A generated H.264 proxy is used when one
+    /// exists, because seeking an AV1/HEVC stream costs seconds; recording
+    /// always reads <see cref="AppConfig.VideoPath"/> itself.
+    /// </summary>
+    private string PreviewVideoPath()
+    {
+        if (!_cfg.UsePreviewProxy || string.IsNullOrWhiteSpace(_cfg.VideoPath))
+        {
+            return _cfg.VideoPath;
+        }
+        var proxy = PreviewProxy.PathFor(_cfg.VideoPath);
+        return PreviewProxy.IsFresh(proxy, _cfg.VideoPath) ? proxy : _cfg.VideoPath;
+    }
+
+    /// <summary>
     /// Opens the current video for previewing.
     ///
     /// The frame is decoded with OpenCV rather than played through MediaElement,
@@ -1304,9 +1324,11 @@ public partial class MainWindow : Window
             CropImage.Source = null;
             return;
         }
+        var source = PreviewVideoPath();
+        var usingProxy = !string.Equals(source, _cfg.VideoPath, StringComparison.OrdinalIgnoreCase);
         try
         {
-            _player = new OpenCvSharp.VideoCapture(_cfg.VideoPath);
+            _player = new OpenCvSharp.VideoCapture(source);
             if (!_player.IsOpened())
             {
                 TxtVideoInfo.Text = "（无法打开视频）";
@@ -1332,8 +1354,10 @@ public partial class MainWindow : Window
             // Play at roughly the video's own rate, but never faster than the
             // UI can redraw.
             _playTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(25, 1000.0 / _playerFps));
-            TxtVideoInfo.Text = $"{Path.GetFileName(_cfg.VideoPath)}   {w}×{h}   {_playerFps:F0}fps   {duration:F1}s";
+            var tag = usingProxy ? "   [预览副本]" : "";
+            TxtVideoInfo.Text = $"{Path.GetFileName(_cfg.VideoPath)}{tag}   {w}×{h}   {_playerFps:F0}fps   {duration:F1}s";
             MarkStrip.SetDuration(duration);
+            OpenAudio(source);
             SeekTo(0);
         }
         catch (Exception ex)
@@ -1343,9 +1367,107 @@ public partial class MainWindow : Window
         }
     }
 
+    // ---- audio ----
+    // OpenCV cannot decode audio, so a MediaPlayer plays the soundtrack while
+    // the frames come from the decoder. Best effort: when the machine cannot
+    // open the container the preview simply stays silent.
+
+    private void OpenAudio(string path)
+    {
+        try
+        {
+            _audio.Close();
+            _audio.Open(new Uri(path));
+            _audio.Volume = 0.7;
+            _audioAvailable = true;
+        }
+        catch
+        {
+            _audioAvailable = false;
+        }
+    }
+
+    private void SyncAudio(bool play)
+    {
+        if (!_audioAvailable)
+        {
+            return;
+        }
+        try
+        {
+            var target = TimeSpan.FromSeconds(Math.Max(0, _playheadSec));
+            if (Math.Abs((_audio.Position - target).TotalSeconds) > 0.4)
+            {
+                _audio.Position = target;
+            }
+            if (play)
+            {
+                _audio.Play();
+            }
+            else
+            {
+                _audio.Pause();
+            }
+        }
+        catch
+        {
+            _audioAvailable = false;
+        }
+    }
+
+    /// <summary>Builds the H.264 preview proxy and reopens the player on it.</summary>
+    private async void OnBuildProxyClick(object sender, RoutedEventArgs e)
+    {
+        if (_scheduler.IsBusy)
+        {
+            Info("任务运行中，请先停止");
+            return;
+        }
+        var source = _cfg.VideoPath;
+        if (!File.Exists(source))
+        {
+            Info("视频不存在: " + source);
+            return;
+        }
+        var ffmpeg = PreviewProxy.FindFfmpeg(_cfg.FfmpegPath);
+        if (ffmpeg is null)
+        {
+            Info("找不到 ffmpeg：把 ffmpeg.exe 放进程序旁的 tools\\ 目录，或加入 PATH");
+            return;
+        }
+
+        var proxy = PreviewProxy.PathFor(source);
+        BtnBuildProxy.IsEnabled = false;
+        var previousStage = StatStage.Text;
+        StatStage.Text = "转码";
+        try
+        {
+            Info($"开始生成预览副本（H.264）: {Path.GetFileName(proxy)}");
+            var progress = new Progress<string>(s => StatStage.Text = s);
+            var (ok, message) = await PreviewProxy.BuildAsync(source, proxy, ffmpeg, progress);
+            Info(message);
+            if (ok)
+            {
+                OpenPlayer();
+                Info("预览已切到副本：拖动和播放都会明显变快（录制仍读原始视频）");
+            }
+        }
+        catch (Exception ex)
+        {
+            Info("生成预览副本失败: " + ex.Message);
+        }
+        finally
+        {
+            BtnBuildProxy.IsEnabled = true;
+            StatStage.Text = previousStage;
+        }
+    }
+
     private void ClosePlayer()
     {
         StopPlayback();
+        try { _audio.Close(); } catch { }
+        _audioAvailable = false;
         lock (_scrubSync)
         {
             _scrubTarget = -1;
@@ -1375,6 +1497,7 @@ public partial class MainWindow : Window
         seconds = Math.Clamp(seconds, 0, duration);
         SetPlayhead(seconds);
         RequestScrub(seconds);
+        SyncAudio(_isPlaying);
     }
 
     /// <summary>Re-renders the frame under the playhead (after a settings change).</summary>
@@ -1499,7 +1622,10 @@ public partial class MainWindow : Window
             }
             try
             {
-                var cap = new OpenCvSharp.VideoCapture(_cfg.VideoPath);
+                // Same file the frame decoder uses: the proxy when present,
+                // otherwise scrubbing would still pay the source codec's seek
+                // cost even though playback was switched to the proxy.
+                var cap = new OpenCvSharp.VideoCapture(PreviewVideoPath());
                 if (!cap.IsOpened())
                 {
                     cap.Dispose();
@@ -1898,6 +2024,7 @@ public partial class MainWindow : Window
                     }
                     _playerFrame = index;
                     _playTimer.Start();
+                    SyncAudio(true);
                 }));
             });
             return;
@@ -1906,12 +2033,14 @@ public partial class MainWindow : Window
         _isPlaying = true;
         BtnPlay.Content = "⏸ 暂停";
         _playTimer.Start();
+        SyncAudio(true);
     }
 
     private void StopPlayback()
     {
         _isPlaying = false;
         _playTimer.Stop();
+        SyncAudio(false);
         if (BtnPlay != null)
         {
             BtnPlay.Content = "▶ 播放";
@@ -1934,6 +2063,13 @@ public partial class MainWindow : Window
         _playerFrame++;
         ShowFrame(frame);
         SetPlayhead(_playerFrame / _playerFps);
+
+        // MediaPlayer drifts slowly; correct it roughly once a second.
+        if (++_audioResyncTick >= 30)
+        {
+            _audioResyncTick = 0;
+            SyncAudio(true);
+        }
     }
 
     private void OnStepFrame(int delta)
@@ -2588,6 +2724,8 @@ public partial class MainWindow : Window
         }
         _cfg.SidebarCollapsed = _sidebarCollapsed;
         TrySaveConfig();
+
+        try { _audio.Close(); } catch { }
         _scheduler.Dispose();
         base.OnClosed(e);
     }

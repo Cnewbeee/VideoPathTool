@@ -302,6 +302,7 @@
                                         <RowDefinition Height="*" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <Border Grid.Row="0" Background="#111827" CornerRadius="4">
                                         <Image x:Name="CropImage" Stretch="Uniform" />
@@ -311,6 +312,9 @@
                                                Text="在左边画面上拖框圈住小地图即可定位" />
                                     <Button Grid.Row="2" Content="自动检测小地图" Click="OnAutoDetectClick"
                                             Margin="0,6,0,0" />
+                                    <Button Grid.Row="3" x:Name="BtnBuildProxy" Content="生成快速预览"
+                                            Click="OnBuildProxyClick" Margin="0,4,0,0"
+                                            ToolTip="把视频转成 H.264 副本供预览：拖动不再卡、播放不再慢放。原始视频不动，录制仍读原件" />
                                 </Grid>
                             </Grid>
 
