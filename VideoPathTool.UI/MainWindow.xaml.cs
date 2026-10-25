@@ -19,6 +19,9 @@ using CvRect = OpenCvSharp.Rect;
 using CvScalar = OpenCvSharp.Scalar;
 // OpenCvSharp also defines a Window type; the WPF one is what this class is.
 using Window = System.Windows.Window;
+// Same clash for geometry: WPF wins here, OpenCV is reached via the Cv aliases.
+using Point = System.Windows.Point;
+using Rect = System.Windows.Rect;
 
 namespace VideoPathTool.UI;
 
@@ -210,6 +213,13 @@ public partial class MainWindow : Window
     private const double SidebarMinWidth = 300;
     private double _sidebarWidth = SidebarDefaultWidth;
     private bool _sidebarCollapsed;
+
+    // ---- drag-to-select the minimap on the preview ----
+    private int _frameWidth;
+    private int _frameHeight;
+    private bool _selecting;
+    private Point _selStart;
+    private Point _selEnd;
 
     // ---- video preview ----
     private OpenCvSharp.VideoCapture? _player;
@@ -1366,6 +1376,11 @@ public partial class MainWindow : Window
 
     private void ShowFrame(Mat frame)
     {
+        // Remembered so a drag on the control can be mapped back to video
+        // pixels (the Image stretches uniformly, so there is letterboxing).
+        _frameWidth = frame.Width;
+        _frameHeight = frame.Height;
+
         var circle = CircleFromConfig();
         var side = Math.Max(8, (int)Math.Round(circle.Radius * 2 * _cfg.CropRatio));
 
@@ -1383,6 +1398,205 @@ public partial class MainWindow : Window
 
         TxtCalibInfo.Text = $"圆心=({circle.CenterX},{circle.CenterY})   半径={circle.Radius}   " +
                             $"裁剪框={side}×{side}px   当前帧 #{_playerFrame}";
+    }
+
+    // ============================================================ 拖动框选小地图
+
+    /// <summary>
+    /// Maps a point in the preview control to video pixels.
+    ///
+    /// The Image uses Stretch=Uniform, so the frame is centred and letterboxed;
+    /// a raw position would be off by the bars. Returns false when the click
+    /// landed on a bar rather than on the picture.
+    /// </summary>
+    private bool TryMapToFrame(Point controlPoint, out double frameX, out double frameY)
+    {
+        frameX = 0;
+        frameY = 0;
+        if (_frameWidth <= 0 || _frameHeight <= 0)
+        {
+            return false;
+        }
+        var w = CalibImage.ActualWidth;
+        var h = CalibImage.ActualHeight;
+        if (w < 4 || h < 4)
+        {
+            return false;
+        }
+        var scale = Math.Min(w / _frameWidth, h / _frameHeight);
+        if (scale <= 0)
+        {
+            return false;
+        }
+        var offsetX = (w - _frameWidth * scale) / 2;
+        var offsetY = (h - _frameHeight * scale) / 2;
+        frameX = Math.Clamp((controlPoint.X - offsetX) / scale, 0, _frameWidth);
+        frameY = Math.Clamp((controlPoint.Y - offsetY) / scale, 0, _frameHeight);
+        return true;
+    }
+
+    /// <summary>Video pixels -> preview control coordinates.</summary>
+    private bool TryMapToControl(double frameX, double frameY, out Point point)
+    {
+        point = new Point();
+        if (_frameWidth <= 0 || _frameHeight <= 0)
+        {
+            return false;
+        }
+        var w = CalibImage.ActualWidth;
+        var h = CalibImage.ActualHeight;
+        if (w < 4 || h < 4)
+        {
+            return false;
+        }
+        var scale = Math.Min(w / _frameWidth, h / _frameHeight);
+        var offsetX = (w - _frameWidth * scale) / 2;
+        var offsetY = (h - _frameHeight * scale) / 2;
+        point = new Point(offsetX + frameX * scale, offsetY + frameY * scale);
+        return true;
+    }
+
+    private void OnFrameMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_player is null || CalibImage.Source is null)
+        {
+            return;
+        }
+        // A drag starts a fresh selection even if one was already drawn.
+        _selStart = e.GetPosition(CalibImage);
+        _selEnd = _selStart;
+        _selecting = true;
+        SelRect.Visibility = Visibility.Visible;
+        SelCircle.Visibility = Visibility.Collapsed;
+        UpdateSelectionVisual();
+        CalibImage.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnFrameMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_selecting)
+        {
+            return;
+        }
+        _selEnd = e.GetPosition(CalibImage);
+        UpdateSelectionVisual();
+    }
+
+    private void OnFrameMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_selecting)
+        {
+            return;
+        }
+        _selecting = false;
+        CalibImage.ReleaseMouseCapture();
+        e.Handled = true;
+
+        _selEnd = e.GetPosition(CalibImage);
+        var rect = SelectionRect();
+        SelRect.Visibility = Visibility.Collapsed;
+        SelCircle.Visibility = Visibility.Collapsed;
+
+        // Too small to be a deliberate drag: treat it as a stray click.
+        if (rect.Width < 8 || rect.Height < 8)
+        {
+            return;
+        }
+
+        if (!TryMapToFrame(rect.TopLeft, out var x1, out var y1) ||
+            !TryMapToFrame(rect.BottomRight, out var x2, out var y2))
+        {
+            return;
+        }
+
+        var cx = (x1 + x2) / 2;
+        var cy = (y1 + y2) / 2;
+        // Least-squares radius for a box drawn around a circle: a square of
+        // side 2r has width+height = 4r.
+        var radius = Math.Max(8, ((x2 - x1) + (y2 - y1)) / 4);
+
+        _cfg.MinimapCenterX = (int)Math.Round(cx);
+        _cfg.MinimapCenterY = (int)Math.Round(cy);
+        _cfg.MinimapRadius = (int)Math.Round(radius);
+        _cfg.AutoDetectMinimap = false;
+        _scheduler.LiveCircle = CircleFromConfig();
+
+        RefreshSettingBoxes();
+        ScheduleSave();
+        RefreshPlayerFrame();
+        Info($"框选小地图: 圆心=({_cfg.MinimapCenterX},{_cfg.MinimapCenterY}) 半径={_cfg.MinimapRadius}");
+    }
+
+    /// <summary>The current drag rectangle, normalised so Width/Height are positive.</summary>
+    private Rect SelectionRect()
+    {
+        var x = Math.Min(_selStart.X, _selEnd.X);
+        var y = Math.Min(_selStart.Y, _selEnd.Y);
+        return new Rect(x, y, Math.Abs(_selEnd.X - _selStart.X), Math.Abs(_selEnd.Y - _selStart.Y));
+    }
+
+    /// <summary>Paints the marquee plus what the resulting circle would look like.</summary>
+    private void UpdateSelectionVisual()
+    {
+        var rect = SelectionRect();
+        SelRect.Width = rect.Width;
+        SelRect.Height = rect.Height;
+        Canvas.SetLeft(SelRect, rect.X);
+        Canvas.SetTop(SelRect, rect.Y);
+
+        if (rect.Width < 8 || rect.Height < 8)
+        {
+            SelCircle.Visibility = Visibility.Collapsed;
+            return;
+        }
+        if (!TryMapToFrame(rect.TopLeft, out var x1, out var y1) ||
+            !TryMapToFrame(rect.BottomRight, out var x2, out var y2) ||
+            !TryMapToControl((x1 + x2) / 2, (y1 + y2) / 2, out var center))
+        {
+            SelCircle.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var radiusPx = ((x2 - x1) + (y2 - y1)) / 4 * PreviewScale();
+        if (radiusPx < 2)
+        {
+            SelCircle.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SelCircle.Width = radiusPx * 2;
+        SelCircle.Height = radiusPx * 2;
+        Canvas.SetLeft(SelCircle, center.X - radiusPx);
+        Canvas.SetTop(SelCircle, center.Y - radiusPx);
+        SelCircle.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Video pixels -> preview pixels.</summary>
+    private double PreviewScale()
+    {
+        if (_frameWidth <= 0 || _frameHeight <= 0)
+        {
+            return 1;
+        }
+        var w = CalibImage.ActualWidth;
+        var h = CalibImage.ActualHeight;
+        if (w < 4 || h < 4)
+        {
+            return 1;
+        }
+        return Math.Min(w / _frameWidth, h / _frameHeight);
+    }
+
+    private void CancelSelection()
+    {
+        _selecting = false;
+        if (CalibImage.IsMouseCaptured)
+        {
+            CalibImage.ReleaseMouseCapture();
+        }
+        SelRect.Visibility = Visibility.Collapsed;
+        SelCircle.Visibility = Visibility.Collapsed;
     }
 
     private void SetPlayhead(double seconds)
@@ -1558,6 +1772,14 @@ public partial class MainWindow : Window
         if (e.Key == Key.B && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
             ToggleSidebar();
+            e.Handled = true;
+            return;
+        }
+
+        // Escaborts a half-finished minimap selection.
+        if (e.Key == Key.Escape && _selecting)
+        {
+            CancelSelection();
             e.Handled = true;
             return;
         }

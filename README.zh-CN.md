@@ -72,6 +72,7 @@ dotnet build VideoPathTool.UI\VideoPathTool.UI.csproj -c Release # 界面
 1. 把 `yt-dlp.exe` 放进 `tools\`（或配置 `yt_dlp_path`，或让它出现在 PATH 里）。
 2. `map_assets_dir` 指向地图资源。
 3. 打开界面，粘贴路线视频链接 → 点「下载并识别」：下载、检测小地图圆、录制、导出一次做完。
+   小地图框不准时，直接在画面上**拖一个框**圈住小地图，圆心和半径会自动填好。
 4. 到「视频与标定」页：播放，看到漏识别的滑翔就按 **F8**（起点、终点各一次），
    需要挂动作按 **F9**。
 5. 点「重新导出」——毫秒级重写 JSON，不用再读视频。

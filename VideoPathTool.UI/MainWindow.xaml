@@ -276,18 +276,40 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="250" />
                                 </Grid.ColumnDefinitions>
-                                <Border Grid.Column="0" Background="#111827" CornerRadius="4">
-                                    <Image x:Name="CalibImage" Stretch="Uniform" />
+                                <!--
+                                  在画面上拖框 = 框选小地图。拖拽本身由这个 Border 接管，
+                                  框选框与圆圈预览由上面那层 Canvas 画（不参与命中测试）。
+                                -->
+                                <Border Grid.Column="0" Background="#111827" CornerRadius="4"
+                                        Cursor="Cross" ClipToBounds="True"
+                                        MouseLeftButtonDown="OnFrameMouseDown"
+                                        MouseMove="OnFrameMouseMove"
+                                        MouseLeftButtonUp="OnFrameMouseUp"
+                                        ToolTip="在小地图上拖一个框，圆心与半径会自动填入（Esc 取消）">
+                                    <Grid>
+                                        <Image x:Name="CalibImage" Stretch="Uniform" />
+                                        <Canvas x:Name="SelectionLayer" IsHitTestVisible="False">
+                                            <Rectangle x:Name="SelRect" Visibility="Collapsed"
+                                                       Stroke="#F59E0B" StrokeThickness="1.5"
+                                                       StrokeDashArray="4 3" Fill="#33F59E0B" />
+                                            <Ellipse x:Name="SelCircle" Visibility="Collapsed"
+                                                     Stroke="#22C55E" StrokeThickness="2" />
+                                        </Canvas>
+                                    </Grid>
                                 </Border>
                                 <Grid Grid.Column="1" Margin="8,0,0,0">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="*" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <Border Grid.Row="0" Background="#111827" CornerRadius="4">
                                         <Image x:Name="CropImage" Stretch="Uniform" />
                                     </Border>
-                                    <Button Grid.Row="1" Content="自动检测小地图" Click="OnAutoDetectClick"
+                                    <TextBlock Grid.Row="1" Margin="0,6,0,0" TextWrapping="Wrap"
+                                               FontSize="11" Foreground="{StaticResource Muted}"
+                                               Text="在左边画面上拖框圈住小地图即可定位" />
+                                    <Button Grid.Row="2" Content="自动检测小地图" Click="OnAutoDetectClick"
                                             Margin="0,6,0,0" />
                                 </Grid>
                             </Grid>

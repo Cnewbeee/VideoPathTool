@@ -29,6 +29,9 @@ individual moments before exporting a JSON that BetterGI can execute.
   Detected windows become `move_mode: "fly"` waypoints.
 - **Point actions.** Bind a BetterGI action, an `orientation` waypoint, a
   per-point move mode or a small coordinate offset to any moment of the video.
+- **Minimap by drag.** Drag a box around the minimap in the preview and the
+  centre and radius are filled in — no guessing three numbers, which matters
+  when a new video has a different resolution or HUD scale.
 - **Annotation timeline.** The whole video's markings as one strip — click to
   seek, see at a glance what is still unmarked.
 - **Resume editing.** One folder per video keeps the export, the recorded
