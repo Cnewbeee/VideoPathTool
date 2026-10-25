@@ -1,0 +1,476 @@
+<Window x:Class="VideoPathTool.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:VideoPathTool.UI"
+        Title="BetterGI 视频路径录制工具" Height="900" Width="1440"
+        MinHeight="640" MinWidth="1080"
+        WindowStartupLocation="CenterScreen"
+        PreviewKeyDown="OnWindowPreviewKeyDown"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="12">
+
+    <DockPanel>
+
+        <!-- ============================ 工具栏 ============================ -->
+        <Border DockPanel.Dock="Top" Background="White" BorderBrush="{StaticResource Line}"
+                BorderThickness="0,0,0,1" Padding="10,8">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="BtnStart" Content="▶ 开始" Style="{StaticResource PrimaryButton}"
+                            Click="OnStartClick" ToolTip="加载地图并完整跑一遍：录制 → 滑翔 → 导出" />
+                    <Button x:Name="BtnPause" Content="⏸ 暂停" Click="OnPauseClick"
+                            ToolTip="在下一帧处挂起，不丢已录数据" />
+                    <Button x:Name="BtnResume" Content="▶ 继续" Click="OnResumeClick"
+                            ToolTip="按当前参数继续（参数改动会生效）" />
+                    <Button x:Name="BtnStop" Content="⏹ 停止" Click="OnStopClick"
+                            ToolTip="取消本次运行" />
+                    <Separator Margin="8,0" />
+                    <Button x:Name="BtnRescan" Content="重扫滑翔" Click="OnRescanClick"
+                            ToolTip="不重录位置，只重新检测滑翔窗口" />
+                    <Button x:Name="BtnExport" Content="重新导出" Click="OnExportClick"
+                            ToolTip="用当前滑翔窗口、点位操作与简化参数重新生成 JSON（瞬时完成）" />
+                    <Button x:Name="BtnLoadCsv" Content="载入 CSV" Click="OnLoadCsvClick"
+                            ToolTip="从调试 CSV 重建，完全不读视频；配合重新导出可反复微调" />
+                    <Separator Margin="8,0" />
+                    <TextBlock x:Name="TxtState" Text="空闲" FontWeight="SemiBold"
+                               Foreground="{StaticResource Muted}" Margin="4,0,0,0" />
+                    <Separator Margin="8,0" />
+                    <Button x:Name="BtnSidebar" Content="☰ 参数" Click="OnToggleSidebarClick"
+                            ToolTip="显示 / 隐藏左侧参数面板（Ctrl+B）" MinWidth="0" />
+                </StackPanel>
+
+                <Border Margin="0,8,0,0" Padding="0,8,0,0"
+                        BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" Text="视频链接" VerticalAlignment="Center"
+                                   Margin="0,0,8,0" Foreground="{StaticResource Muted}" />
+                        <TextBox x:Name="UrlBox" Grid.Column="1" VerticalContentAlignment="Center"
+                                 ToolTip="支持 B 站等站点；下载完成后自动填入视频路径并可直接开始识别" />
+                        <Button x:Name="BtnDownload" Grid.Column="2" Content="下载并识别"
+                                Click="OnDownloadClick" Style="{StaticResource PrimaryButton}"
+                                ToolTip="下载到固定目录，然后立刻开始录制" />
+                        <TextBlock x:Name="TxtDownloadDir" Grid.Column="3" VerticalAlignment="Center"
+                                   Margin="10,0,8,0" FontSize="11" Foreground="{StaticResource Muted}"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="380" />
+                        <Button x:Name="BtnOpenDownload" Grid.Column="4" Content="打开目录"
+                                Click="OnOpenDownloadClick" MinWidth="0" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- ============================ 状态栏 ============================ -->
+        <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource Line}"
+                BorderThickness="0,1,0,0" Padding="10,5">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="TxtStatus" Grid.Column="0" Text="就绪" Foreground="{StaticResource Muted}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="TxtConfigPath" Grid.Column="1" Foreground="{StaticResource Muted}"
+                           FontSize="11" TextTrimming="CharacterEllipsis" MaxWidth="620" />
+            </Grid>
+        </Border>
+
+        <!-- ============================ 主体 ============================ -->
+        <Grid Margin="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="ColSettings" Width="392" MinWidth="300" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" MinWidth="420" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧：参数 -->
+            <ScrollViewer x:Name="SettingsScroll" Grid.Column="0" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="SettingsStack" Margin="0,0,4,0">
+                    <Expander Header="视频与输出" IsExpanded="True">
+                        <StackPanel x:Name="PanelVideo" />
+                    </Expander>
+                    <Expander Header="小地图" IsExpanded="True">
+                        <StackPanel x:Name="PanelMinimap" />
+                    </Expander>
+                    <Expander Header="采样与匹配">
+                        <StackPanel x:Name="PanelMatch" />
+                    </Expander>
+                    <Expander Header="路径简化">
+                        <StackPanel x:Name="PanelPath" />
+                    </Expander>
+                    <Expander Header="滑翔检测" IsExpanded="True">
+                        <StackPanel x:Name="PanelGlide" />
+                    </Expander>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!--
+              折叠把手压在分隔条上方：上半截点一下收/放，下半截拖动改宽度。
+              收起后这一列仍然在，所以恢复入口始终可见。
+            -->
+            <Grid Grid.Column="1">
+                <GridSplitter HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                              Background="{StaticResource Line}"
+                              ResizeBehavior="PreviousAndNext" ShowsPreview="False"
+                              DragCompleted="OnSidebarSplitterDragCompleted" />
+                <Button x:Name="BtnToggleSidebar" VerticalAlignment="Top" HorizontalAlignment="Center"
+                        Content="«" Style="{StaticResource SidebarHandle}"
+                        Click="OnToggleSidebarClick" />
+            </Grid>
+
+            <!-- 右侧：进度 + 标签页 -->
+            <Grid Grid.Column="2" Margin="4,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- 进度卡片 -->
+                <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource Line}"
+                        BorderThickness="1" CornerRadius="4" Padding="12,10" Margin="0,0,0,8">
+                    <StackPanel>
+                        <ProgressBar x:Name="BarMain" Height="8" Minimum="0" Maximum="1" Value="0" />
+                        <UniformGrid Columns="6" Margin="0,10,0,0">
+                            <StackPanel>
+                                <TextBlock Text="阶段" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="StatStage" Text="—" Style="{StaticResource StatValue}" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="视频时间" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="StatTime" Text="0 / 0 s" Style="{StaticResource StatValue}" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="匹配率" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="StatRate" Text="—" Style="{StaticResource StatValue}" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="已录点" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="StatPoints" Text="0" Style="{StaticResource StatValue}" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="已用" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="StatElapsed" Text="0 s" Style="{StaticResource StatValue}" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="预计剩余" Style="{StaticResource Caption}" />
+                                <TextBlock x:Name="StatEta" Text="—" Style="{StaticResource StatValue}" FontSize="14" />
+                            </StackPanel>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
+
+                <TabControl Grid.Row="1" x:Name="Tabs">
+
+                    <!-- ===== 概览 ===== -->
+                    <TabItem Header="概览">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <UniformGrid Grid.Row="0" Columns="5" Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="采样帧" Style="{StaticResource Caption}" />
+                                    <TextBlock x:Name="OvSampled" Text="0" Style="{StaticResource StatValue}" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="匹配成功" Style="{StaticResource Caption}" />
+                                    <TextBlock x:Name="OvMatched" Text="0" Style="{StaticResource StatValue}" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="匹配失败" Style="{StaticResource Caption}" />
+                                    <TextBlock x:Name="OvFailed" Text="0" Style="{StaticResource StatValue}" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="路径点" Style="{StaticResource Caption}" />
+                                    <TextBlock x:Name="OvWaypoints" Text="0" Style="{StaticResource StatValue}" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="fly 点" Style="{StaticResource Caption}" />
+                                    <TextBlock x:Name="OvFly" Text="0" Style="{StaticResource StatValue}" />
+                                </StackPanel>
+                            </UniformGrid>
+
+                            <Border Grid.Row="1" Background="#FEF9C3" BorderBrush="#FDE68A" BorderThickness="1"
+                                    CornerRadius="4" Padding="10,7" Margin="0,0,0,10"
+                                    x:Name="WarnBanner" Visibility="Collapsed">
+                                <TextBlock x:Name="WarnText" TextWrapping="Wrap" Foreground="{StaticResource Warn}" />
+                            </Border>
+
+                            <DockPanel Grid.Row="2">
+                                <TextBlock DockPanel.Dock="Top" Text="断点（传送 / 跟踪丢失）"
+                                           Style="{StaticResource SectionHeader}" Margin="0,0,0,4" />
+                                <ListBox x:Name="BreakList" BorderBrush="{StaticResource Line}" FontSize="11" />
+                            </DockPanel>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ===== 视频与标定 ===== -->
+                    <TabItem Header="视频与标定">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <!-- 播放控制 -->
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6"
+                                        VerticalAlignment="Center">
+                                <Button x:Name="BtnPlay" Content="▶ 播放" Click="OnPlayClick" MinWidth="86" />
+                                <Button Content="◀ 1 帧" Click="OnStepBackClick" MinWidth="0" />
+                                <Button Content="1 帧 ▶" Click="OnStepForwardClick" MinWidth="0" />
+                                <Button Content="◀ 1 秒" Click="OnSeekBackClick" MinWidth="0" />
+                                <Button Content="1 秒 ▶" Click="OnSeekForwardClick" MinWidth="0" />
+                                <TextBlock x:Name="TxtPlayhead" Text="0.00 s" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" Margin="14,0,0,0" FontSize="14" />
+                                <Border x:Name="NowBadge" Background="#EFF6FF" BorderBrush="#BFDBFE"
+                                        BorderThickness="1" CornerRadius="3" Padding="7,2" Margin="12,0,0,0"
+                                        VerticalAlignment="Center" Visibility="Collapsed">
+                                    <TextBlock x:Name="TxtNowMarking" Text="" FontSize="11"
+                                               Foreground="#1D4ED8" />
+                                </Border>
+                                <TextBlock x:Name="TxtVideoInfo" Foreground="{StaticResource Muted}"
+                                           VerticalAlignment="Center" Margin="12,0,0,0" FontSize="11" />
+                            </StackPanel>
+
+                            <!-- 标注时间轴：滑翔段 + 动作点，点击可跳转 -->
+                            <DockPanel Grid.Row="1" Margin="0,0,0,6">
+                                <Border DockPanel.Dock="Right" Margin="8,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock x:Name="TxtStripLegend" FontSize="11"
+                                               Foreground="{StaticResource Muted}" Text="" />
+                                </Border>
+                                <!--
+                                  The transparent Border takes the mouse input.
+                                  A bare FrameworkElement whose content is drawn in
+                                  OnRender does not reliably receive hit tests, and the
+                                  strip must be clickable, so the host handles it.
+                                -->
+                                <Border x:Name="StripHost" Background="Transparent" Cursor="Hand"
+                                        PreviewMouseLeftButtonDown="OnStripHostDown"
+                                        PreviewMouseMove="OnStripHostMove"
+                                        PreviewMouseLeftButtonUp="OnStripHostUp">
+                                    <local:TimelineStrip x:Name="MarkStrip" />
+                                </Border>
+                            </DockPanel>
+
+                            <Slider Grid.Row="2" x:Name="CalibSlider" Minimum="0" Maximum="1"
+                                    IsMoveToPointEnabled="True" Margin="0,0,0,6"
+                                    ValueChanged="OnCalibSliderChanged" />
+
+                            <!-- 画面 + 小地图裁剪 -->
+                            <Grid Grid.Row="3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="250" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Background="#111827" CornerRadius="4">
+                                    <Image x:Name="CalibImage" Stretch="Uniform" />
+                                </Border>
+                                <Grid Grid.Column="1" Margin="8,0,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Border Grid.Row="0" Background="#111827" CornerRadius="4">
+                                        <Image x:Name="CropImage" Stretch="Uniform" />
+                                    </Border>
+                                    <Button Grid.Row="1" Content="自动检测小地图" Click="OnAutoDetectClick"
+                                            Margin="0,6,0,0" />
+                                </Grid>
+                            </Grid>
+
+                            <!-- 在当前帧打标记 -->
+                            <WrapPanel Grid.Row="4" Margin="0,8,0,0" VerticalAlignment="Center">
+                                <Button Content="＋ 在此帧添加点位操作" Click="OnAddActionClick"
+                                        Style="{StaticResource PrimaryButton}"
+                                        ToolTip="快捷键 F9" />
+                                <Button x:Name="BtnMarkGlide" Content="● 标记滑翔起点" Click="OnMarkGlideClick"
+                                        ToolTip="快捷键 F8：在滑翔展开处按一次，落地前再按一次" />
+                                <Button x:Name="BtnCancelMark" Content="取消标记" Click="OnCancelMarkClick"
+                                        IsEnabled="False" MinWidth="0" />
+                                <TextBlock x:Name="TxtMarkHint" VerticalAlignment="Center" Margin="10,0,0,0"
+                                           Foreground="{StaticResource Muted}"
+                                           Text="空格播放/暂停 · ←→ 逐帧 · Shift+←→ 逐秒 · F8 标记滑翔 · F9 加操作" />
+                            </WrapPanel>
+
+                            <TextBlock Grid.Row="5" x:Name="TxtCalibInfo" Foreground="{StaticResource Muted}"
+                                       Margin="0,6,0,0" Text="尚未载入视频" />
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ===== 滑翔窗口 ===== -->
+                    <TabItem Header="滑翔窗口">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button Content="添加" Click="OnAddGlideClick" />
+                                <Button Content="删除选中" Click="OnRemoveGlideClick" />
+                                <Button Content="全部启用" Click="OnEnableAllGlideClick" />
+                                <Button Content="全部禁用" Click="OnDisableAllGlideClick" />
+                                <Button Content="重新导出" Click="OnExportClick" Style="{StaticResource PrimaryButton}" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="1" TextWrapping="Wrap" Foreground="{StaticResource Muted}"
+                                       Margin="0,0,0,8">
+                                勾选的行会在导出的 JSON 里被标记为 move_mode = fly。
+                                取消勾选即可把某段恢复成 run，改动后点"重新导出"立即生效，无需重跑视频。
+                            </TextBlock>
+
+                            <DataGrid Grid.Row="2" x:Name="GlideGrid" IsReadOnly="False"
+                                      MouseDoubleClick="OnGlideGridDoubleClick">
+                                <DataGrid.Columns>
+                                    <!--
+                                      A template column rather than DataGridCheckBoxColumn:
+                                      the built-in column needs two clicks (one to enter edit
+                                      mode, one to toggle), which makes reviewing a dozen
+                                      windows painful.
+                                    -->
+                                    <DataGridTemplateColumn Header="启用" Width="52">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="开始(s)" Width="84"
+                                        Binding="{Binding StartSec, UpdateSourceTrigger=PropertyChanged}" />
+                                    <DataGridTextColumn Header="结束(s)" Width="84"
+                                        Binding="{Binding EndSec, UpdateSourceTrigger=PropertyChanged}" />
+                                    <DataGridTextColumn Header="置信度" Width="70" IsReadOnly="True"
+                                        Binding="{Binding ConfidenceText}" />
+                                    <DataGridTextColumn Header="来源" Width="*" IsReadOnly="True"
+                                        Binding="{Binding Reason}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <TextBlock Grid.Row="3" x:Name="TxtGlideSummary" Margin="0,8,0,0"
+                                       Foreground="{StaticResource Muted}" Text="尚无滑翔窗口" />
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ===== 点位操作 ===== -->
+                    <TabItem Header="点位操作">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button Content="在此帧添加点位操作" Click="OnAddActionClick"
+                                        ToolTip="用「视频与标定」页当前播放位置作为绑定时刻" />
+                                <Button Content="删除选中" Click="OnRemoveActionClick" />
+                                <Button Content="全部启用" Click="OnEnableAllActionClick" />
+                                <Button Content="全部禁用" Click="OnDisableAllActionClick" />
+                                <Button Content="重新导出" Click="OnExportClick" Style="{StaticResource PrimaryButton}" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="1" TextWrapping="Wrap" Foreground="{StaticResource Muted}"
+                                       Margin="0,0,0,8">
+                                每行绑定视频里的一个时刻；导出时会吸附到时间最近的路径点。
+                                「动作」是 BetterGI 支持的固定动作列表（战斗、拾取、使用小道具…），
+                                BGI 没有任意按键的 action，键盘只能通过这些内置动作间接触发。
+                                「点位类型 = orientation 方位点」用于让角色转向该点做定位校准，
+                                ΔX/ΔY 用于把这个点整体挪一点。双击一行可跳到对应画面。
+                            </TextBlock>
+
+                            <DataGrid Grid.Row="2" x:Name="ActionGrid" IsReadOnly="False"
+                                      MouseDoubleClick="OnActionGridDoubleClick">
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="启用" Width="46">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="时间(s)" Width="70"
+                                        Binding="{Binding TimeSec, UpdateSourceTrigger=PropertyChanged}" />
+                                    <DataGridTemplateColumn Header="动作" Width="150">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <ComboBox ItemsSource="{Binding DataContext.ActionOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          DisplayMemberPath="Label" SelectedValuePath="Code"
+                                                          SelectedValue="{Binding Action, UpdateSourceTrigger=PropertyChanged}"
+                                                          ToolTip="{Binding ParamHint}" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="参数" Width="90"
+                                        Binding="{Binding ActionParams, UpdateSourceTrigger=PropertyChanged}" />
+                                    <DataGridTemplateColumn Header="点位类型" Width="150">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <ComboBox ItemsSource="{Binding DataContext.TypeOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          DisplayMemberPath="Label" SelectedValuePath="Code"
+                                                          SelectedValue="{Binding WaypointType, UpdateSourceTrigger=PropertyChanged}" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="移动模式" Width="130">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <ComboBox ItemsSource="{Binding DataContext.MoveModeOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          DisplayMemberPath="Label" SelectedValuePath="Code"
+                                                          SelectedValue="{Binding MoveMode, UpdateSourceTrigger=PropertyChanged}" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="ΔX" Width="56"
+                                        Binding="{Binding OffsetX, UpdateSourceTrigger=PropertyChanged}" />
+                                    <DataGridTextColumn Header="ΔY" Width="56"
+                                        Binding="{Binding OffsetY, UpdateSourceTrigger=PropertyChanged}" />
+                                    <DataGridTextColumn Header="备注" Width="*"
+                                        Binding="{Binding Note, UpdateSourceTrigger=PropertyChanged}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <TextBlock Grid.Row="3" x:Name="TxtActionSummary" Margin="0,8,0,0"
+                                       Foreground="{StaticResource Muted}" Text="尚无点位操作" />
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ===== 日志 ===== -->
+                    <TabItem Header="日志">
+                        <DockPanel Margin="8">
+                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                                <Button Content="清空" Click="OnClearLogClick" />
+                                <CheckBox x:Name="ChkAutoScroll" Content="自动滚动到底部" IsChecked="True"
+                                          Margin="6,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBox x:Name="LogBox" IsReadOnly="True" AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                     FontFamily="Consolas, Microsoft YaHei UI" FontSize="11"
+                                     TextWrapping="NoWrap" Background="#0F172A" Foreground="#E2E8F0" />
+                        </DockPanel>
+                    </TabItem>
+
+                </TabControl>
+            </Grid>
+        </Grid>
+    </DockPanel>
+</Window>
+

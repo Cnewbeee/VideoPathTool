@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>VideoPathTool.UI</AssemblyName>
+    <RootNamespace>VideoPathTool.UI</RootNamespace>
+    <ApplicationIcon />
+    <!--
+      Do NOT set InvariantGlobalization here. WPF's binding engine resolves a
+      real CultureInfo for typed bindings (the DataGrid edits doubles), and
+      under invariant mode that throws
+      "Cannot find non-neutral culture related to 'en-US'".
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VideoPathTool\VideoPathTool.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the detector next to the window so it works out of the box. -->
+    <None Include="..\VideoPathTool\glider.onnx" Link="glider.onnx"
+          CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\VideoPathTool\glider.onnx')" />
+  </ItemGroup>
+
+</Project>

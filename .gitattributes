@@ -1,0 +1,22 @@
+# Normalise line endings so the repo is consistent across platforms.
+* text=auto eol=lf
+
+*.cs        text eol=lf
+*.xaml      text eol=lf
+*.csproj    text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+*.ps1       text eol=lf
+
+*.sln       text eol=crlf
+*.bat       text eol=crlf
+
+# Binary assets
+*.onnx      binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.zip       binary

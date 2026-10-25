@@ -1,0 +1,49 @@
+# ============================================================
+# build output
+# ============================================================
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+.vs/
+*.cache
+publish/
+
+# ============================================================
+# local data — never commit these
+#
+# video            recordings, extracted frames, YOLO datasets (gigabytes,
+#                  and the footage belongs to whoever recorded it)
+# assets           map images extracted from the game (copyrighted)
+# AutoPathing      third-party route JSON collection
+# better-genshin-impact   upstream repo kept for reference
+# tools            yt-dlp.exe and friends
+# ============================================================
+/video/
+/assets/
+/AutoPathing/
+/better-genshin-impact/
+/tools/
+/output/
+
+*.exe
+*.npy
+*.pt
+*.onnx.data
+*.log
+
+# ============================================================
+# machine-specific config (contains absolute local paths)
+# ============================================================
+**/VideoPathTool.config.json
+**/VideoPathTool.UI.config.json
+*.local.json
+
+# ============================================================
+# editor / OS noise
+# ============================================================
+Thumbs.db
+.DS_Store
+desktop.ini
+.idea/
+*.swp
