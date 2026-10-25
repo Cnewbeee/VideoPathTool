@@ -1,0 +1,43 @@
+name: release
+
+# Builds a ready-to-run Windows package and attaches it to the GitHub release.
+# Pushing a v* tag creates the release; manual runs only exercise the build.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Framework-dependent on purpose: self-contained would be ~150 MB and the
+      # .NET 8 Desktop Runtime is a small, well-known prerequisite.
+      - name: Publish editor
+        run: dotnet publish VideoPathTool.UI/VideoPathTool.UI.csproj -c Release -r win-x64 --self-contained false -o out
+
+      - name: Publish console tool
+        run: dotnet publish VideoPathTool/VideoPathTool.csproj -c Release -r win-x64 --self-contained false -o out
+
+      - name: Package
+        run: Compress-Archive -Path out/* -DestinationPath VideoPathTool-win-x64.zip -Force
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: VideoPathTool-win-x64.zip
+          generate_release_notes: true
