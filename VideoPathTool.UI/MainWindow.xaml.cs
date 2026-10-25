@@ -231,6 +231,17 @@ public partial class MainWindow : Window
     private bool _suppressSliderCallback;
     private double? _glideMarkStart;
 
+    // ---- background scrubbing ----
+    // Seeking costs about one keyframe interval of decoding; doing it on the UI
+    // thread froze the window, and queuing one seek per slider tick made it take
+    // many seconds to catch up. One worker, newest request wins.
+    private readonly object _scrubSync = new();
+    private OpenCvSharp.VideoCapture? _scrubCap;
+    private double _scrubTarget = -1;
+    private long _scrubSeq;
+    private bool _scrubBusy;
+    private int _scrubIndex = -1;
+
     // Bound by the ComboBox columns of the point-action grid.
     public IReadOnlyList<ActionOption> ActionOptions => ActionCatalog.Actions;
     public IReadOnlyList<WaypointTypeOption> TypeOptions => ActionCatalog.WaypointTypes;
@@ -1335,12 +1346,25 @@ public partial class MainWindow : Window
     private void ClosePlayer()
     {
         StopPlayback();
+        lock (_scrubSync)
+        {
+            _scrubTarget = -1;
+            _scrubCap?.Dispose();
+            _scrubCap = null;
+            _scrubIndex = -1;
+        }
         _player?.Dispose();
         _player = null;
         _playerFrame = 0;
     }
 
-    /// <summary>Moves to a timestamp and redraws that exact frame.</summary>
+    /// <summary>
+    /// Moves the playhead and asks for that frame.
+    ///
+    /// Decoding happens on a worker (<see cref="ScrubLoop"/>): seeking an AV1
+    /// stream costs roughly a keyframe interval of decoding, so doing it inline
+    /// froze the window for seconds every time the scrubber moved.
+    /// </summary>
     private void SeekTo(double seconds)
     {
         if (_player is null)
@@ -1349,18 +1373,8 @@ public partial class MainWindow : Window
         }
         var duration = Math.Max(0, CalibSlider.Maximum);
         seconds = Math.Clamp(seconds, 0, duration);
-        var index = (int)Math.Round(seconds * _playerFps);
-        index = Math.Clamp(index, 0, Math.Max(0, _playerTotalFrames - 1));
-
-        _player.Set(VideoCaptureProperties.PosFrames, index);
-        using var frame = new Mat();
-        if (!_player.Read(frame) || frame.Empty())
-        {
-            return;
-        }
-        _playerFrame = index;
-        ShowFrame(frame);
-        SetPlayhead(index / _playerFps);
+        SetPlayhead(seconds);
+        RequestScrub(seconds);
     }
 
     /// <summary>Re-renders the frame under the playhead (after a settings change).</summary>
@@ -1371,16 +1385,149 @@ public partial class MainWindow : Window
             OpenPlayer();
             return;
         }
-        SeekTo(_playheadSec);
+        RequestScrub(_playheadSec);
     }
 
-    private void ShowFrame(Mat frame)
-    {
-        // Remembered so a drag on the control can be mapped back to video
-        // pixels (the Image stretches uniformly, so there is letterboxing).
-        _frameWidth = frame.Width;
-        _frameHeight = frame.Height;
+    // ---- background scrubbing ----
 
+    /// <summary>
+    /// Queues a frame request. Only the newest one matters: while a seek is in
+    /// flight further requests just overwrite the target, so dragging the
+    /// scrubber across the file costs one decode instead of one per tick.
+    /// </summary>
+    private void RequestScrub(double seconds)
+    {
+        lock (_scrubSync)
+        {
+            _scrubTarget = seconds;
+            _scrubSeq++;
+            if (_scrubBusy)
+            {
+                return;
+            }
+            _scrubBusy = true;
+        }
+        _ = Task.Run(ScrubLoop);
+    }
+
+    private void ScrubLoop()
+    {
+        // The loop must never die: if it did, _scrubBusy would stay set and
+        // every later scrub request would be ignored, making the preview look
+        // frozen while the rest of the window still worked.
+        try
+        {
+            while (true)
+            {
+                double target;
+                long seq;
+                lock (_scrubSync)
+                {
+                    target = _scrubTarget;
+                    seq = _scrubSeq;
+                    _scrubTarget = -1;
+                    if (target < 0)
+                    {
+                        return;
+                    }
+                }
+
+                RenderedFrame? rendered = null;
+                try
+                {
+                    var cap = EnsureScrubCapture();
+                    if (cap is not null)
+                    {
+                        var index = (int)Math.Clamp(
+                            Math.Round(target * _playerFps), 0, Math.Max(0, _playerTotalFrames - 1));
+                        var frame = new Mat();
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
+                        cap.Set(VideoCaptureProperties.PosFrames, index);
+                        var okRead = cap.Read(frame) && !frame.Empty();
+                        sw.Stop();
+                        if (okRead)
+                        {
+                            rendered = RenderFrame(frame, index);
+                            _scrubIndex = index;
+                        }
+                        frame.Dispose();
+                    }
+                }
+                catch (Exception ex)
+                {
+                }
+
+                if (rendered is not null)
+                {
+                    var r = rendered;
+                    // Only the UI thread may touch controls.
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        // Drop frames the user has already scrubbed past.
+                        if (seq == Interlocked.Read(ref _scrubSeq))
+                        {
+                            ApplyRendered(r, setPlayhead: true);
+                        }
+                    }));
+                }
+            }
+        }
+        finally
+        {
+            // Close the window where a request slips in between the loop
+            // deciding to exit and the busy flag being cleared.
+            bool restart;
+            lock (_scrubSync)
+            {
+                restart = _scrubTarget >= 0;
+                _scrubBusy = restart;
+            }
+            if (restart)
+            {
+                _ = Task.Run(ScrubLoop);
+            }
+        }
+    }
+
+    private OpenCvSharp.VideoCapture? EnsureScrubCapture()
+    {
+        lock (_scrubSync)
+        {
+            if (_scrubCap is not null)
+            {
+                return _scrubCap;
+            }
+            try
+            {
+                var cap = new OpenCvSharp.VideoCapture(_cfg.VideoPath);
+                if (!cap.IsOpened())
+                {
+                    cap.Dispose();
+                    return null;
+                }
+                _scrubCap = cap;
+                _scrubIndex = -1;
+                return cap;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    private sealed record RenderedFrame(
+        BitmapSource Overlay, BitmapSource Crop, int FrameWidth, int FrameHeight,
+        int FrameIndex, string Info);
+
+    /// <summary>
+    /// Draws the minimap overlay and crops the minimap out of a frame.
+    ///
+    /// Pure CPU work on the calling thread so the scrub worker can do it off the
+    /// UI thread; the resulting bitmaps are frozen before they are handed over.
+    /// </summary>
+    private RenderedFrame RenderFrame(Mat frame, int frameIndex)
+    {
         var circle = CircleFromConfig();
         var side = Math.Max(8, (int)Math.Round(circle.Radius * 2 * _cfg.CropRatio));
 
@@ -1390,68 +1537,104 @@ public partial class MainWindow : Window
         Cv2.Rectangle(overlay,
             new CvRect(circle.CenterX - side / 2, circle.CenterY - side / 2, side, side),
             new CvScalar(0, 200, 255), 2);
-        CalibImage.Source = ToBitmap(overlay);
 
         using var crop = MinimapLocator.ExtractMinimap(
             frame, circle.CenterX, circle.CenterY, circle.Radius, _cfg.CropRatio);
-        CropImage.Source = ToBitmap(crop);
 
-        TxtCalibInfo.Text = $"圆心=({circle.CenterX},{circle.CenterY})   半径={circle.Radius}   " +
-                            $"裁剪框={side}×{side}px   当前帧 #{_playerFrame}";
+        var info = $"圆心=({circle.CenterX},{circle.CenterY})   半径={circle.Radius}   " +
+                   $"裁剪框={side}×{side}px   当前帧 #{frameIndex}";
+        return new RenderedFrame(ToBitmap(overlay), ToBitmap(crop), frame.Width, frame.Height, frameIndex, info);
+    }
+
+    private void ApplyRendered(RenderedFrame r, bool setPlayhead)
+    {
+        _frameWidth = r.FrameWidth;
+        _frameHeight = r.FrameHeight;
+        _playerFrame = r.FrameIndex;
+        CalibImage.Source = r.Overlay;
+        CropImage.Source = r.Crop;
+        TxtCalibInfo.Text = r.Info;
+        if (setPlayhead)
+        {
+            SetPlayhead(r.FrameIndex / Math.Max(1e-6, _playerFps));
+        }
+    }
+
+    /// <summary>Shows a transient hint in the calibration line.</summary>
+    private void StatusHint(string text)
+    {
+        if (TxtCalibInfo is not null)
+        {
+            TxtCalibInfo.Text = text;
+        }
+    }
+
+
+    /// <summary>Renders a frame directly (playback path).</summary>
+    private void ShowFrame(Mat frame)
+    {
+        ApplyRendered(RenderFrame(frame, _playerFrame), setPlayhead: false);
     }
 
     // ============================================================ 拖动框选小地图
 
     /// <summary>
-    /// Maps a point in the preview control to video pixels.
+    /// Geometry of the letterboxed frame inside the preview box.
     ///
-    /// The Image uses Stretch=Uniform, so the frame is centred and letterboxed;
-    /// a raw position would be off by the bars. Returns false when the click
-    /// landed on a bar rather than on the picture.
+    /// Everything is measured against <see cref="VideoHost"/>, the Grid that
+    /// contains both the Image and the selection Canvas. Measuring against the
+    /// Image itself looked reasonable but is not: with Stretch=Uniform its
+    /// measured height can settle at the letterboxed content height, which
+    /// silently changed the vertical offset and put the resulting circle below
+    /// the drawn box. The Grid's size is simply the video area.
     /// </summary>
-    private bool TryMapToFrame(Point controlPoint, out double frameX, out double frameY)
+    private bool TryGetFrameGeometry(out double scale, out double offsetX, out double offsetY)
     {
-        frameX = 0;
-        frameY = 0;
+        scale = 0;
+        offsetX = 0;
+        offsetY = 0;
         if (_frameWidth <= 0 || _frameHeight <= 0)
         {
             return false;
         }
-        var w = CalibImage.ActualWidth;
-        var h = CalibImage.ActualHeight;
+        var w = VideoHost.ActualWidth;
+        var h = VideoHost.ActualHeight;
         if (w < 4 || h < 4)
         {
             return false;
         }
-        var scale = Math.Min(w / _frameWidth, h / _frameHeight);
+        scale = Math.Min(w / _frameWidth, h / _frameHeight);
         if (scale <= 0)
         {
             return false;
         }
-        var offsetX = (w - _frameWidth * scale) / 2;
-        var offsetY = (h - _frameHeight * scale) / 2;
+        offsetX = (w - _frameWidth * scale) / 2;
+        offsetY = (h - _frameHeight * scale) / 2;
+        return true;
+    }
+
+    /// <summary>Maps a point in the preview box to video pixels.</summary>
+    private bool TryMapToFrame(Point controlPoint, out double frameX, out double frameY)
+    {
+        frameX = 0;
+        frameY = 0;
+        if (!TryGetFrameGeometry(out var scale, out var offsetX, out var offsetY))
+        {
+            return false;
+        }
         frameX = Math.Clamp((controlPoint.X - offsetX) / scale, 0, _frameWidth);
         frameY = Math.Clamp((controlPoint.Y - offsetY) / scale, 0, _frameHeight);
         return true;
     }
 
-    /// <summary>Video pixels -> preview control coordinates.</summary>
+    /// <summary>Video pixels -> preview box coordinates.</summary>
     private bool TryMapToControl(double frameX, double frameY, out Point point)
     {
         point = new Point();
-        if (_frameWidth <= 0 || _frameHeight <= 0)
+        if (!TryGetFrameGeometry(out var scale, out var offsetX, out var offsetY))
         {
             return false;
         }
-        var w = CalibImage.ActualWidth;
-        var h = CalibImage.ActualHeight;
-        if (w < 4 || h < 4)
-        {
-            return false;
-        }
-        var scale = Math.Min(w / _frameWidth, h / _frameHeight);
-        var offsetX = (w - _frameWidth * scale) / 2;
-        var offsetY = (h - _frameHeight * scale) / 2;
         point = new Point(offsetX + frameX * scale, offsetY + frameY * scale);
         return true;
     }
@@ -1463,7 +1646,7 @@ public partial class MainWindow : Window
             return;
         }
         // A drag starts a fresh selection even if one was already drawn.
-        _selStart = e.GetPosition(CalibImage);
+        _selStart = e.GetPosition(VideoHost);
         _selEnd = _selStart;
         _selecting = true;
         SelRect.Visibility = Visibility.Visible;
@@ -1479,7 +1662,7 @@ public partial class MainWindow : Window
         {
             return;
         }
-        _selEnd = e.GetPosition(CalibImage);
+        _selEnd = e.GetPosition(VideoHost);
         UpdateSelectionVisual();
     }
 
@@ -1493,7 +1676,7 @@ public partial class MainWindow : Window
         CalibImage.ReleaseMouseCapture();
         e.Handled = true;
 
-        _selEnd = e.GetPosition(CalibImage);
+        _selEnd = e.GetPosition(VideoHost);
         var rect = SelectionRect();
         SelRect.Visibility = Visibility.Collapsed;
         SelCircle.Visibility = Visibility.Collapsed;
@@ -1574,19 +1757,7 @@ public partial class MainWindow : Window
 
     /// <summary>Video pixels -> preview pixels.</summary>
     private double PreviewScale()
-    {
-        if (_frameWidth <= 0 || _frameHeight <= 0)
-        {
-            return 1;
-        }
-        var w = CalibImage.ActualWidth;
-        var h = CalibImage.ActualHeight;
-        if (w < 4 || h < 4)
-        {
-            return 1;
-        }
-        return Math.Min(w / _frameWidth, h / _frameHeight);
-    }
+        => TryGetFrameGeometry(out var scale, out _, out _) ? scale : 1;
 
     private void CancelSelection()
     {
@@ -1687,11 +1858,51 @@ public partial class MainWindow : Window
                 return;
             }
         }
+
         // Restart from the beginning if the playhead is already at the end.
-        if (_playheadSec >= CalibSlider.Maximum - 0.05)
+        var start = _playheadSec >= CalibSlider.Maximum - 0.05 ? 0 : _playheadSec;
+        var current = _playerFrame / Math.Max(1e-6, _playerFps);
+
+        if (Math.Abs(start - current) > 0.5)
         {
-            SeekTo(0);
+            // Scrubbing only moves the decoder owned by the scrub worker, so
+            // the playback decoder has to be re-seated. Do it off the UI thread
+            // or the window freezes for a keyframe interval on slow codecs.
+            var index = (int)Math.Clamp(
+                Math.Round(start * _playerFps), 0, Math.Max(0, _playerTotalFrames - 1));
+            _isPlaying = true;
+            BtnPlay.Content = "⏸ 暂停";
+            StatusHint("定位中…");
+            Task.Run(() =>
+            {
+                var ok = false;
+                try
+                {
+                    ok = _player.Set(VideoCaptureProperties.PosFrames, index);
+                }
+                catch
+                {
+                    ok = false;
+                }
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!_isPlaying)
+                    {
+                        return; // stopped while the seek was running
+                    }
+                    if (!ok)
+                    {
+                        StopPlayback();
+                        StatusHint("");
+                        return;
+                    }
+                    _playerFrame = index;
+                    _playTimer.Start();
+                }));
+            });
+            return;
         }
+
         _isPlaying = true;
         BtnPlay.Content = "⏸ 暂停";
         _playTimer.Start();

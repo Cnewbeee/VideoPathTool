@@ -387,7 +387,14 @@ public static class VideoDownloader
         // the name is sanitised by Sanitize() instead.
         psi.ArgumentList.Add("--windows-filenames");
         psi.ArgumentList.Add("-f");
-        psi.ArgumentList.Add("bv*/b");
+        // Prefer H.264, then any AVC, then whatever is available.
+        //
+        // Sites increasingly serve AV1 to modern clients, and software AV1
+        // decoding is roughly eight times slower than H.264 here: a 1080p AV1
+        // frame cost ~85 ms and a seek ~2 s (a full keyframe interval), which
+        // makes both recording and scrubbing in the editor crawl. The picture
+        // quality difference is irrelevant for map matching.
+        psi.ArgumentList.Add("bv*[vcodec^=avc1]/bv*[vcodec^=avc]/bv*/b");
         psi.ArgumentList.Add("--merge-output-format");
         psi.ArgumentList.Add("mp4");
         psi.ArgumentList.Add("-o");

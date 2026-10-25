@@ -286,7 +286,7 @@
                                         MouseMove="OnFrameMouseMove"
                                         MouseLeftButtonUp="OnFrameMouseUp"
                                         ToolTip="在小地图上拖一个框，圆心与半径会自动填入（Esc 取消）">
-                                    <Grid>
+                                    <Grid x:Name="VideoHost">
                                         <Image x:Name="CalibImage" Stretch="Uniform" />
                                         <Canvas x:Name="SelectionLayer" IsHitTestVisible="False">
                                             <Rectangle x:Name="SelRect" Visibility="Collapsed"
