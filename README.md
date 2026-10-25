@@ -57,6 +57,19 @@ shipped with BetterGI or a grasscutter-style asset dump.
 
 Without it the recorder cannot match anything, so this is the first thing to set.
 
+## Download
+
+Grab `VideoPathTool-win-x64.zip` from the [latest release][releases] and unpack
+it wherever you like. It needs the [.NET 8 Desktop Runtime][runtime]; everything
+else — including the glide model and the OpenCV native libraries — is inside the
+archive.
+
+On first launch it writes `VideoPathTool.config.json` next to the executable.
+Point `map_assets_dir` at your map assets before recording (see below).
+
+[releases]: https://github.com/Cnewbeee/VideoPathTool/releases/latest
+[runtime]: https://dotnet.microsoft.com/download/dotnet/8.0
+
 ## Build from source
 
 ```powershell

@@ -40,6 +40,18 @@
 
 **这一步不做，录制会一个点都匹配不到**，是首先要设的东西。
 
+## 直接下载
+
+到 [Releases][releases] 下 `VideoPathTool-win-x64.zip`，解压到任意目录即可。
+需要装 [.NET 8 Desktop Runtime][runtime]，其余依赖（含滑翔模型、OpenCV 原生库）
+都在压缩包里。
+
+首次运行会在程序旁边生成 `VideoPathTool.config.json`，录制前先把
+`map_assets_dir` 指向你的地图资源。
+
+[releases]: https://github.com/Cnewbeee/VideoPathTool/releases/latest
+[runtime]: https://dotnet.microsoft.com/download/dotnet/8.0
+
 ## 编译
 
 ```powershell
