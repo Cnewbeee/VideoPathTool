@@ -231,6 +231,9 @@ public partial class MainWindow : Window
     private bool _suppressSliderCallback;
     private double? _glideMarkStart;
 
+    /// <summary>Preview playback rate; 1 = real time.</summary>
+    private double _playbackSpeed = 1.0;
+
     // ---- audio (OpenCV decodes no sound, so MediaPlayer plays it) ----
     private readonly MediaPlayer _audio = new();
     private bool _audioAvailable;
@@ -1076,6 +1079,13 @@ public partial class MainWindow : Window
             Info($"视频已切换: {_cfg.VideoPath}");
             Info($"输出 JSON: {_cfg.OutputPath}");
 
+            // A slow codec (AV1) would make every later scrub take seconds;
+            // build the H.264 proxy now that we know which file it is.
+            if (_cfg.AutoBuildProxy)
+            {
+                await EnsurePreviewProxyAsync(force: false);
+            }
+
             // The minimap circle is unknown for a brand new video, so detect it
             // before recording instead of failing 40 % into the run.
             await DetectCircleAsync();
@@ -1353,7 +1363,7 @@ public partial class MainWindow : Window
 
             // Play at roughly the video's own rate, but never faster than the
             // UI can redraw.
-            _playTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(25, 1000.0 / _playerFps));
+            UpdatePlaybackInterval();
             var tag = usingProxy ? "   [预览副本]" : "";
             TxtVideoInfo.Text = $"{Path.GetFileName(_cfg.VideoPath)}{tag}   {w}×{h}   {_playerFps:F0}fps   {duration:F1}s";
             MarkStrip.SetDuration(duration);
@@ -1423,44 +1433,127 @@ public partial class MainWindow : Window
             Info("任务运行中，请先停止");
             return;
         }
-        var source = _cfg.VideoPath;
-        if (!File.Exists(source))
-        {
-            Info("视频不存在: " + source);
-            return;
-        }
-        var ffmpeg = PreviewProxy.FindFfmpeg(_cfg.FfmpegPath);
-        if (ffmpeg is null)
-        {
-            Info("找不到 ffmpeg：把 ffmpeg.exe 放进程序旁的 tools\\ 目录，或加入 PATH");
-            return;
-        }
-
-        var proxy = PreviewProxy.PathFor(source);
         BtnBuildProxy.IsEnabled = false;
-        var previousStage = StatStage.Text;
-        StatStage.Text = "转码";
         try
         {
-            Info($"开始生成预览副本（H.264）: {Path.GetFileName(proxy)}");
-            var progress = new Progress<string>(s => StatStage.Text = s);
-            var (ok, message) = await PreviewProxy.BuildAsync(source, proxy, ffmpeg, progress);
-            Info(message);
-            if (ok)
+            if (await EnsurePreviewProxyAsync(force: true))
             {
                 OpenPlayer();
-                Info("预览已切到副本：拖动和播放都会明显变快（录制仍读原始视频）");
             }
-        }
-        catch (Exception ex)
-        {
-            Info("生成预览副本失败: " + ex.Message);
         }
         finally
         {
             BtnBuildProxy.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Makes sure a usable preview proxy exists.
+    ///
+    /// <paramref name="force"/> builds unconditionally (the button);
+    /// otherwise the codec is probed first and already-fast files are left
+    /// alone, so a download does not spend minutes re-encoding H.264.
+    /// Returns true when a proxy is available afterwards.
+    /// </summary>
+    private async Task<bool> EnsurePreviewProxyAsync(bool force)
+    {
+        var source = _cfg.VideoPath;
+        if (!File.Exists(source))
+        {
+            if (force)
+            {
+                Info("视频不存在: " + source);
+            }
+            return false;
+        }
+        var proxy = PreviewProxy.PathFor(source);
+        if (!force && PreviewProxy.IsFresh(proxy, source))
+        {
+            return true;
+        }
+
+        var ffmpeg = PreviewProxy.FindFfmpeg(_cfg.FfmpegPath);
+        if (ffmpeg is null)
+        {
+            AppendLog("未找到 ffmpeg，跳过生成预览副本");
+            if (force)
+            {
+                Info("找不到 ffmpeg：把 ffmpeg.exe 放进程序旁的 tools\\ 目录，或加入 PATH");
+            }
+            return false;
+        }
+
+        if (!force)
+        {
+            var (needed, reason) = await PreviewProxy.NeedsProxyAsync(
+                source, PreviewProxy.FindFfprobe(ffmpeg));
+            AppendLog($"预览副本判定: {reason}");
+            if (!needed)
+            {
+                return false;
+            }
+        }
+
+        var previousStage = StatStage.Text;
+        StatStage.Text = "转码";
+        try
+        {
+            Info($"生成预览副本（H.264）: {Path.GetFileName(proxy)}");
+            var progress = new Progress<string>(s => StatStage.Text = s);
+            var (ok, message) = await PreviewProxy.BuildAsync(source, proxy, ffmpeg, progress);
+            Info(message);
+            return ok;
+        }
+        catch (Exception ex)
+        {
+            Info("生成预览副本失败: " + ex.Message);
+            return false;
+        }
+        finally
+        {
             StatStage.Text = previousStage;
         }
+    }
+
+    private void OnSpeedChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_playTimer is null || SpeedBox is null)
+        {
+            return;
+        }
+        _playbackSpeed = SpeedBox.SelectedIndex switch
+        {
+            0 => 0.5,
+            2 => 2.0,
+            3 => 4.0,
+            _ => 1.0
+        };
+        UpdatePlaybackInterval();
+
+        // MediaPlayer cannot change rate, so fast playback is silent.
+        if (Math.Abs(_playbackSpeed - 1.0) > 0.01)
+        {
+            try { _audio.Pause(); } catch { }
+        }
+        else if (_isPlaying)
+        {
+            SyncAudio(true);
+        }
+
+        // Hand focus back: while the combo has it the preview shortcuts
+        // (space / arrows) are deliberately ignored, which feels like the
+        // keyboard stopped working.
+        BtnPlay.Focus();
+    }
+
+    private void UpdatePlaybackInterval()
+    {
+        if (_playTimer is null || _playerFps <= 0)
+        {
+            return;
+        }
+        var speed = Math.Max(0.1, _playbackSpeed);
+        _playTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(8, 1000.0 / _playerFps / speed));
     }
 
     private void ClosePlayer()

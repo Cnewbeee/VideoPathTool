@@ -234,6 +234,15 @@
                                 <Button Content="1 帧 ▶" Click="OnStepForwardClick" MinWidth="0" />
                                 <Button Content="◀ 1 秒" Click="OnSeekBackClick" MinWidth="0" />
                                 <Button Content="1 秒 ▶" Click="OnSeekForwardClick" MinWidth="0" />
+                                <ComboBox x:Name="SpeedBox" Width="64" Margin="6,0,0,0"
+                                          VerticalContentAlignment="Center"
+                                          SelectionChanged="OnSpeedChanged"
+                                          ToolTip="播放倍速；非 1x 时声音暂停（声音无法变速）">
+                                    <ComboBoxItem Content="0.5x" />
+                                    <ComboBoxItem Content="1x" IsSelected="True" />
+                                    <ComboBoxItem Content="2x" />
+                                    <ComboBoxItem Content="4x" />
+                                </ComboBox>
                                 <TextBlock x:Name="TxtPlayhead" Text="0.00 s" FontWeight="SemiBold"
                                            VerticalAlignment="Center" Margin="14,0,0,0" FontSize="14" />
                                 <Border x:Name="NowBadge" Background="#EFF6FF" BorderBrush="#BFDBFE"

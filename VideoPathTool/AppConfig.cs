@@ -27,6 +27,12 @@ public class AppConfig
     /// </summary>
     public bool UsePreviewProxy { get; set; } = true;
 
+    /// <summary>
+    /// After a download, transcode a preview proxy automatically when the
+    /// source codec is a slow one (AV1/HEVC). Already-fast files are skipped.
+    /// </summary>
+    public bool AutoBuildProxy { get; set; } = true;
+
     /// <summary>Root that holds one folder per route (see <see cref="AppPaths"/>).</summary>
     public string RouteDir { get; set; } = AppPaths.RouteDir;
 

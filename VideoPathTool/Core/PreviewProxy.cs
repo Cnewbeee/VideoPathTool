@@ -49,6 +49,70 @@ public static class PreviewProxy
         }
     }
 
+    /// <summary>
+    /// Reports the source's video codec, or null when it cannot be determined.
+    /// </summary>
+    public static async Task<string?> ProbeCodecAsync(string path, string? ffprobe, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(ffprobe) || !File.Exists(ffprobe) || !File.Exists(path))
+        {
+            return null;
+        }
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = ffprobe,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            foreach (var a in new[]
+                     {
+                         "-v", "error", "-select_streams", "v:0",
+                         "-show_entries", "stream=codec_name",
+                         "-of", "default=nw=1:nk=1", path
+                     })
+            {
+                psi.ArgumentList.Add(a);
+            }
+            using var proc = new Process { StartInfo = psi };
+            proc.Start();
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            _ = proc.StandardError.ReadToEndAsync();
+            await proc.WaitForExitAsync(ct).ConfigureAwait(false);
+            var codec = (await stdoutTask.ConfigureAwait(false)).Trim();
+            return proc.ExitCode == 0 && codec.Length > 0 ? codec : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// True when the codec is known to decode slowly in software, so a proxy is
+    /// worth the transcode. An unknown codec is left alone rather than spending
+    /// minutes converting something that may already be fast.
+    /// </summary>
+    public static async Task<(bool Needed, string Reason)> NeedsProxyAsync(
+        string path, string? ffprobe, CancellationToken ct = default)
+    {
+        var codec = await ProbeCodecAsync(path, ffprobe, ct).ConfigureAwait(false);
+        if (codec is null)
+        {
+            return (false, "无法识别编码，跳过自动转码");
+        }
+        return codec.ToLowerInvariant() switch
+        {
+            "av1" => (true, "AV1 软解很慢"),
+            "hevc" or "h265" => (true, "HEVC 软解较慢"),
+            "h264" or "avc1" => (false, "已是 H.264，无需转码"),
+            _ => (false, $"{codec} 未判定为慢编码，跳过")
+        };
+    }
+
     /// <summary>Locates ffmpeg: configured path, then the tools folder, then PATH.</summary>
     public static string? FindFfmpeg(string? configured)
     {
@@ -100,6 +164,42 @@ public static class PreviewProxy
             }
         }
         return null;
+    }
+
+    /// <summary>Locates ffprobe next to ffmpeg, then in tools, then on PATH.</summary>
+    public static string? FindFfprobe(string? ffmpegPath)
+    {
+        if (!string.IsNullOrWhiteSpace(ffmpegPath))
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(ffmpegPath);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    foreach (var name in new[] { "ffprobe.exe", "ffprobe" })
+                    {
+                        var candidate = Path.Combine(dir, name);
+                        if (File.Exists(candidate))
+                        {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Fall through to PATH.
+            }
+        }
+        foreach (var name in new[] { "ffprobe.exe", "ffprobe" })
+        {
+            var local = Path.Combine(AppPaths.ToolsDir, name);
+            if (File.Exists(local))
+            {
+                return local;
+            }
+        }
+        return FindOnPath("ffprobe");
     }
 
     /// <summary>
