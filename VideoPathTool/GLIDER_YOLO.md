@@ -427,7 +427,7 @@ p5  fly (9197.61, 2863.72) <- t=17.50   dist=0.00u   窗口 17.7-24.3
 | `glider.onnx` | 最终模型（**v6**，12.3 MB） |
 | `GLIDER_YOLO.md` | 本报告 |
 
-### 训练侧（`F:\GENSHIN1\video\scripts\`）
+### 训练侧（仓库里的 `training/`）
 | 脚本 | 作用 |
 |---|---|
 | `_make_yolo_ds5.py` | 伪标签数据集构建（最终版，含负样本安全网） |
@@ -438,6 +438,10 @@ p5  fly (9197.61, 2863.72) <- t=17.50   dist=0.00u   窗口 17.7-24.3
 | `_bench_res.py` | 推理分辨率对比 |
 | `_wingbox_v2.py` | 翼框选算法（宽且居中） |
 | `_verify_lb.py` | 验证 C# 预处理与 ultralytics 一致 |
+
+路径不再硬编码：脚本通过 `training/_paths.py` 的 `data(...)` 取路径，
+默认根目录是仓库本身，可用环境变量 `VPT_ROOT` 指向别处。
+数据集的准备与依赖见 [`training/README.md`](../training/README.md)。
 
 ### 训练产物（`F:\GENSHIN1\video\output\yolo\`）
 | 目录 | 内容 |

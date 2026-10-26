@@ -161,6 +161,7 @@ swallows plain letter keys before they reach the window.
 | [VideoPathTool.UI/README.md](VideoPathTool.UI/README.md) | UI, scheduler, timeline, annotations (Chinese) |
 | [VideoPathTool/PATHSIMPLIFY.md](VideoPathTool/PATHSIMPLIFY.md) | how waypoints are simplified |
 | [VideoPathTool/GLIDER_YOLO.md](VideoPathTool/GLIDER_YOLO.md) | glide detection model: data, training, results |
+| [training/README.md](training/README.md) | the dataset/training scripts behind that model |
 | [VideoPathTool/GLIDER_ANALYSIS.md](VideoPathTool/GLIDER_ANALYSIS.md) | why a learned detector beats the heuristic |
 | [VideoPathTool/GLIDER_ROUTEA.md](VideoPathTool/GLIDER_ROUTEA.md) | the heuristic detector |
 
