@@ -48,12 +48,12 @@ public class AppConfig
     /// </summary>
     public string MapAssetsDir { get; set; } =
         Path.Combine(AppPaths.BaseDir, "assets", "map", "contentFiles", "any", "any", "Assets", "Map", "Teyvat");
-    public bool AutoDetectMinimap { get; set; } = true;
-    public int MinimapCenterX { get; set; } = 280;
-    public int MinimapCenterY { get; set; } = 268;
-    public int MinimapRadius { get; set; } = 289;
-    public int DetectSearchSize { get; set; } = 650;
-    public double CropRatio { get; set; } = 1.0;
+    public bool AutoDetectMinimap { get; set; } = false;
+    public int MinimapCenterX { get; set; } = 285;
+    public int MinimapCenterY { get; set; } = 277;
+    public int MinimapRadius { get; set; } = 277;
+    public int DetectSearchSize { get; set; } = 450;
+    public double CropRatio { get; set; } = 0.8;
     public double SampleFps { get; set; } = 2.0;
     public double ConfidenceThreshold { get; set; } = 0.95;
     public int MatchRank { get; set; } = 2;

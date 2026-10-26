@@ -41,7 +41,8 @@ individual moments before exporting a JSON that BetterGI can execute.
   in software, which makes scrubbing take seconds; one ffmpeg pass produces an
   H.264 copy that seeks 15x faster. Recording still reads the original.
 - **Link → route.** Paste a Bilibili/YouTube link and the tool downloads it
-  (yt-dlp), detects the minimap circle, records and exports in one go.
+  (yt-dlp), detects the minimap circle, records and exports in one go. For a
+  Bilibili collection you get a page list to choose from first.
 
 ![glide windows](docs/images/ui-glide-windows.png)
 

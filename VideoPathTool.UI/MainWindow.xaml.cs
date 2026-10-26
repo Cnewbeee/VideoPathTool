@@ -1119,6 +1119,43 @@ public partial class MainWindow : Window
             return;
         }
 
+        // A bilibili collection link usually arrives without ?p=. Ask the user
+        // which page to analyse rather than silently taking P1.
+        if (BiliParts.TryGetBvid(url, out var bvid) && BiliParts.TryGetPageParam(url) is null)
+        {
+            BtnDownload.IsEnabled = false;
+            var previousStage = StatStage.Text;
+            StatStage.Text = "查询分P";
+            try
+            {
+                AppendLog($"查询分P列表: {bvid}");
+                var parts = await BiliParts.FetchAsync(bvid);
+                if (parts is { Count: > 1 })
+                {
+                    var dlg = new PickPartWindow(
+                        $"这个链接是合集，共 {parts.Count} 个分P（{bvid}）。选一个来解析：",
+                        parts) { Owner = this };
+                    if (dlg.ShowDialog() != true)
+                    {
+                        Info("已取消选择分P");
+                        return;
+                    }
+                    url = BiliParts.WithPage(url, dlg.SelectedPage);
+                    UrlBox.Text = url;
+                    AppendLog($"已选择 P{dlg.SelectedPage} → {url}");
+                }
+                else if (parts is null)
+                {
+                    AppendLog("未能取到分P列表（可能是单视频或接口受限），按单条处理");
+                }
+            }
+            finally
+            {
+                BtnDownload.IsEnabled = true;
+                StatStage.Text = previousStage;
+            }
+        }
+
         BtnDownload.IsEnabled = false;
         BarMain.Value = 0;
         StatStage.Text = "下载";
@@ -1169,9 +1206,17 @@ public partial class MainWindow : Window
                 await EnsurePreviewProxyAsync(force: false);
             }
 
-            // The minimap circle is unknown for a brand new video, so detect it
-            // before recording instead of failing 40 % into the run.
-            await DetectCircleAsync();
+            // Only when the user asked for it: with a known-good preset the
+            // detector would silently replace it, which is exactly what they
+            // turned the flag off to prevent.
+            if (_cfg.AutoDetectMinimap)
+            {
+                await DetectCircleAsync();
+            }
+            else
+            {
+                AppendLog("已跳过自动检测小地图（开始时自动检测处于关闭状态）");
+            }
             StartRun();
         }
         catch (Exception ex)
