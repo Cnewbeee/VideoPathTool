@@ -204,7 +204,12 @@ public static class PreviewProxy
 
     /// <summary>
     /// Transcodes <paramref name="source"/> to H.264 next to it.
-    /// Returns the proxy path on success, null plus a message on failure.
+    ///
+    /// Writes to a sibling <c>.part.mp4</c> and only renames it into place on
+    /// success. Two reasons: a half-written file must never be mistaken for a
+    /// finished proxy (the freshness check is by timestamp), and replacing the
+    /// final name can fail while something else — typically the editor's own
+    /// preview — still holds the old file open.
     /// </summary>
     public static async Task<(bool Ok, string Message)> BuildAsync(
         string source,
@@ -223,6 +228,19 @@ public static class PreviewProxy
             Directory.CreateDirectory(dir);
         }
 
+        var temp = proxy + ".part.mp4";
+        try
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+        catch
+        {
+            return (false, $"无法写入临时文件 {Path.GetFileName(temp)}（被占用？）");
+        }
+
         // crf 26 on an already-compressed source is visually lossless for map
         // matching and keeps the file close to the original size. Audio is
         // copied when present so the preview still has sound.
@@ -234,7 +252,7 @@ public static class PreviewProxy
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
             "-c:a", "copy",
             "-movflags", "+faststart",
-            proxy
+            temp
         };
 
         var psi = new ProcessStartInfo
@@ -293,16 +311,47 @@ public static class PreviewProxy
             await proc.WaitForExitAsync(ct).ConfigureAwait(false);
             await stderrTask.ConfigureAwait(false);
 
-            if (proc.ExitCode == 0 && File.Exists(proxy))
+            if (proc.ExitCode != 0 || !File.Exists(temp))
             {
-                return (true, $"预览副本已生成: {Path.GetFileName(proxy)}");
+                var detail = string.Join(" | ", tail.TakeLast(3));
+                TryDelete(temp);
+                return (false, $"转码失败（退出码 {proc.ExitCode}）{detail}");
             }
-            var detail = string.Join(" | ", tail.TakeLast(3));
-            return (false, $"转码失败（退出码 {proc.ExitCode}）{detail}");
+
+            // Move into place. This is the step that fails when the editor (or
+            // any player) still has the previous proxy open.
+            try
+            {
+                File.Move(temp, proxy, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                TryDelete(temp);
+                return (false,
+                    $"副本已转好但无法替换旧文件（可能正被占用，先切走预览或关掉播放器再试）: {ex.Message}");
+            }
+
+            return (true, $"预览副本已生成: {Path.GetFileName(proxy)}");
         }
         catch (Exception ex)
         {
+            TryDelete(temp);
             return (false, "转码失败: " + ex.Message);
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Leftover temp files are harmless; they are cleared next run.
         }
     }
 }

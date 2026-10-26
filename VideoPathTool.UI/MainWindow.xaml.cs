@@ -250,6 +250,9 @@ public partial class MainWindow : Window
     private bool _scrubBusy;
     private int _scrubIndex = -1;
 
+    /// <summary>Blocks scrubbing while the proxy file is being replaced.</summary>
+    private volatile bool _scrubSuspended;
+
     // Bound by the ComboBox columns of the point-action grid.
     public IReadOnlyList<ActionOption> ActionOptions => ActionCatalog.Actions;
     public IReadOnlyList<WaypointTypeOption> TypeOptions => ActionCatalog.WaypointTypes;
@@ -1436,10 +1439,9 @@ public partial class MainWindow : Window
         BtnBuildProxy.IsEnabled = false;
         try
         {
-            if (await EnsurePreviewProxyAsync(force: true))
-            {
-                OpenPlayer();
-            }
+            // EnsurePreviewProxyAsync reopens the player itself, on the new
+            // proxy when it succeeded and on the original otherwise.
+            await EnsurePreviewProxyAsync(force: true);
         }
         finally
         {
@@ -1496,6 +1498,15 @@ public partial class MainWindow : Window
 
         var previousStage = StatStage.Text;
         StatStage.Text = "转码";
+        var resumeAt = _playheadSec;
+        var hadPlayer = _player is not null;
+
+        // Release every handle on the proxy before touching it. The preview is
+        // usually showing exactly that file, and Windows refuses to replace an
+        // open file - which is what made the rebuild fail with "Permission
+        // denied" right after a first successful build.
+        _scrubSuspended = true;
+        ClosePlayer();
         try
         {
             Info($"生成预览副本（H.264）: {Path.GetFileName(proxy)}");
@@ -1511,7 +1522,15 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _scrubSuspended = false;
             StatStage.Text = previousStage;
+            // Always bring the preview back: on the fresh proxy if it worked,
+            // on the original if it did not. Otherwise the panel would be blank.
+            OpenPlayer();
+            if (hadPlayer && resumeAt > 0.05)
+            {
+                SeekTo(resumeAt);
+            }
         }
     }
 
@@ -1613,6 +1632,10 @@ public partial class MainWindow : Window
     /// </summary>
     private void RequestScrub(double seconds)
     {
+        if (_scrubSuspended)
+        {
+            return;
+        }
         lock (_scrubSync)
         {
             _scrubTarget = seconds;
@@ -1712,6 +1735,10 @@ public partial class MainWindow : Window
             if (_scrubCap is not null)
             {
                 return _scrubCap;
+            }
+            if (_scrubSuspended)
+            {
+                return null;
             }
             try
             {
