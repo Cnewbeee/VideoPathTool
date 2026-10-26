@@ -273,7 +273,7 @@ public sealed class RecordingPipeline : IDisposable
     }
 
     /// <summary>Writes the BGI pathing JSON.</summary>
-    public void SaveJson(PipelineResult result, string? outputPath = null)
+    public void SaveJson(PipelineResult result, string? outputPath = null, bool updateResult = true)
     {
         var path = string.IsNullOrWhiteSpace(outputPath) ? _cfg.OutputPath : outputPath;
         var name = string.IsNullOrWhiteSpace(_cfg.RouteName)
@@ -306,7 +306,13 @@ public sealed class RecordingPipeline : IDisposable
             });
         }
         task.Save(path);
-        result.OutputPath = path;
+        // An export to a chosen folder is a copy: the project's canonical path
+        // must keep pointing at its own route folder, or the next 重新导出 would
+        // silently write into the copy location.
+        if (updateResult)
+        {
+            result.OutputPath = path;
+        }
         _log($"已导出 JSON: {path}  (路径点 {result.Waypoints.Count} 个)");
     }
 

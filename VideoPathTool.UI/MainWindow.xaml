@@ -28,6 +28,8 @@
                             ToolTip="不重录位置，只重新检测滑翔窗口" />
                     <Button x:Name="BtnExport" Content="重新导出" Click="OnExportClick"
                             ToolTip="用当前滑翔窗口、点位操作与简化参数重新生成 JSON（瞬时完成）" />
+                    <Button x:Name="BtnExportTo" Content="导出到…" Click="OnExportToClick"
+                            ToolTip="把这份路线另存到指定目录（例如 BetterGI 的 AutoPathing）；不影响工程内的正式 JSON" />
                     <Button x:Name="BtnLoadCsv" Content="载入 CSV" Click="OnLoadCsvClick"
                             ToolTip="从调试 CSV 重建，完全不读视频；配合重新导出可反复微调" />
                     <Separator Margin="8,0" />

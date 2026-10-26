@@ -522,6 +522,7 @@ public partial class MainWindow : Window
         BtnStop.IsEnabled = busy;
         BtnRescan.IsEnabled = !busy && hasResult;
         BtnExport.IsEnabled = !busy && hasResult;
+        BtnExportTo.IsEnabled = !busy && hasResult;
         BtnDownload.IsEnabled = !busy;
         BtnLoadCsv.IsEnabled = !busy;
 
@@ -625,6 +626,85 @@ public partial class MainWindow : Window
     }
 
     private void OnClearLogClick(object sender, RoutedEventArgs e) => LogBox.Clear();
+
+    /// <summary>
+    /// Saves a copy of the route into a folder the user picks.
+    ///
+    /// The canonical JSON stays in the route folder - this is for handing the
+    /// file to BetterGI, which reads routes from its own AutoPathing folder.
+    /// Waypoints are rebuilt first so the copy always matches what is on screen,
+    /// even if the user has not pressed 重新导出 since the last edit.
+    /// </summary>
+    private void OnExportToClick(object sender, RoutedEventArgs e)
+    {
+        if (_scheduler.IsBusy)
+        {
+            Info("任务运行中，请先停止或等待完成");
+            return;
+        }
+        var result = _scheduler.LastResult;
+        if (result is null)
+        {
+            Info("还没有录制结果，无法导出");
+            return;
+        }
+
+        var seed = _cfg.ExportDir;
+        if (string.IsNullOrWhiteSpace(seed) || !Directory.Exists(seed))
+        {
+            seed = Path.GetDirectoryName(_cfg.OutputPath) ?? string.Empty;
+        }
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "导出到指定目录"
+        };
+        if (!string.IsNullOrEmpty(seed) && Directory.Exists(seed))
+        {
+            dlg.InitialDirectory = seed;
+        }
+        if (dlg.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var dir = dlg.FolderName;
+        var stem = string.IsNullOrWhiteSpace(_cfg.RouteName)
+            ? AppPaths.RouteNameFor(_cfg.VideoPath)
+            : _cfg.RouteName;
+        var target = Path.Combine(dir, AppPaths.SafeName(stem) + ".json");
+
+        if (File.Exists(target))
+        {
+            var answer = MessageBox.Show(this,
+                $"目标文件已存在，覆盖？\r\n\r\n{target}", "导出到目录",
+                MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            var windows = _glideRows.Where(r => r.Enabled).Select(r => r.ToSegment()).ToList();
+            var actions = _actionRows.Where(r => r.Enabled).Select(r => r.ToAction()).ToList();
+            using var pipeline = new RecordingPipeline(_cfg, AppendLog);
+            var waypoints = pipeline.BuildWaypoints(result, windows, actions);
+            result.Glides = windows;
+            result.Actions = actions;
+            // updateResult: false - a copy must not move the project's own path.
+            pipeline.SaveJson(result, target, updateResult: false);
+
+            _cfg.ExportDir = dir;
+            ScheduleSave();
+            UpdateActionSummary(result.ActionBindings);
+            Info($"已导出副本，路径点 {waypoints.Count} 个 → {target}");
+        }
+        catch (Exception ex)
+        {
+            Info("导出失败: " + ex.Message);
+        }
+    }
 
     /// <summary>
     /// Rebuilds from a debug CSV. Nothing reads the video, so this is the fast
@@ -2469,6 +2549,9 @@ public partial class MainWindow : Window
             readOnly: true, hint: "同目录 debug.csv，用于免重录重建");
         AddPath(PanelVideo, "工程文件", () => _cfg.ProjectPath, _ => { }, string.Empty,
             readOnly: true, hint: "同目录 project.json，保存滑翔窗口与点位操作");
+        AddPath(PanelVideo, "导出目录", () => _cfg.ExportDir, v => _cfg.ExportDir = v, string.Empty,
+            hint: "「导出到…」默认打开这里，可指向 BetterGI 的 AutoPathing 目录；留空则从路线目录开始",
+            folder: true);
 
         AddText(PanelVideo, "路线名", () => _cfg.RouteName, v =>
         {
@@ -2621,7 +2704,7 @@ public partial class MainWindow : Window
     }
 
     private void AddPath(StackPanel host, string label, Func<string> get, Action<string> set, string filter,
-        bool readOnly = false, string? hint = null)
+        bool readOnly = false, string? hint = null, bool folder = false)
     {
         var grid = SettingRow(label, hint ?? (readOnly ? "由固定目录与视频名自动生成" : "双击文本框可直接输入路径"));
 
@@ -2669,15 +2752,33 @@ public partial class MainWindow : Window
         };
         btn.Click += (_, _) =>
         {
-            var dlg = new Microsoft.Win32.OpenFileDialog { Filter = filter };
             var current = get();
+            if (folder)
+            {
+                var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "选择目录" };
+                var seed = !string.IsNullOrWhiteSpace(current) && Directory.Exists(current)
+                    ? current
+                    : Path.GetDirectoryName(_cfg.OutputPath);
+                if (!string.IsNullOrEmpty(seed) && Directory.Exists(seed))
+                {
+                    dlg.InitialDirectory = seed;
+                }
+                if (dlg.ShowDialog(this) == true)
+                {
+                    box.Text = dlg.FolderName;
+                    Commit();
+                }
+                return;
+            }
+
+            var fileDlg = new Microsoft.Win32.OpenFileDialog { Filter = filter };
             if (!string.IsNullOrEmpty(current) && File.Exists(current))
             {
-                dlg.InitialDirectory = Path.GetDirectoryName(current);
+                fileDlg.InitialDirectory = Path.GetDirectoryName(current);
             }
-            if (dlg.ShowDialog(this) == true)
+            if (fileDlg.ShowDialog(this) == true)
             {
-                box.Text = dlg.FileName;
+                box.Text = fileDlg.FileName;
                 Commit();
             }
         };

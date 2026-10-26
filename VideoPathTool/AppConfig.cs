@@ -210,6 +210,13 @@ public class AppConfig
     /// <summary>Editor state for this route: glide windows and point actions.</summary>
     public string ProjectPath { get; set; } = "";
 
+    /// <summary>
+    /// Where "导出到…" starts. The canonical export always stays in the route
+    /// folder; this is only the default for saving a copy elsewhere, usually a
+    /// BetterGI AutoPathing folder.
+    /// </summary>
+    public string ExportDir { get; set; } = "";
+
     /// <summary>Window layout, remembered so the panel does not pop back open.</summary>
     public bool SidebarCollapsed { get; set; }
 
