@@ -69,6 +69,13 @@ public sealed class RecordingScheduler : IDisposable
 
     public bool IsBusy => State is SchedulerState.Running or SchedulerState.Paused or SchedulerState.Stopping;
 
+    /// <summary>
+    /// The task of the current (or last) run. <see cref="RunAsync"/> swallows its
+    /// exceptions into state events, so awaiting this never throws - it is what a
+    /// batch driver uses to wait for "this video is done" before starting the next.
+    /// </summary>
+    public Task? Completion => _run;
+
     private void SetState(SchedulerState s)
     {
         State = s;

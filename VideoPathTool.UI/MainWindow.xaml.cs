@@ -81,6 +81,31 @@ public sealed class GlideRow : INotifyPropertyChanged
 }
 
 /// <summary>
+/// One page of a bilibili collection, bound to the 合集分P grid.
+/// </summary>
+public sealed class PartRow : INotifyPropertyChanged
+{
+    private bool _checked;
+
+    public bool Checked
+    {
+        get => _checked;
+        set
+        {
+            if (_checked == value) return;
+            _checked = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Checked)));
+        }
+    }
+
+    public int Page { get; init; }
+    public string PageLabel => "P" + Page;
+    public string Title { get; init; } = string.Empty;
+    public string DurationText { get; init; } = string.Empty;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+/// <summary>
 /// One editable manual operation, bound to a moment in the video.
 /// </summary>
 public sealed class ActionRow : INotifyPropertyChanged
@@ -196,6 +221,7 @@ public partial class MainWindow : Window
     private readonly RecordingScheduler _scheduler;
     private readonly ObservableCollection<GlideRow> _glideRows = new();
     private readonly ObservableCollection<ActionRow> _actionRows = new();
+    private readonly ObservableCollection<PartRow> _partRows = new();
     private readonly List<Action> _refreshers = new();
     private readonly DispatcherTimer _saveTimer;
     private readonly DispatcherTimer _actionSaveTimer;
@@ -230,6 +256,10 @@ public partial class MainWindow : Window
     private bool _isPlaying;
     private bool _suppressSliderCallback;
     private double? _glideMarkStart;
+
+    // ---- 合集批量处理 ----
+    private bool _batchRunning;
+    private bool _batchStopping;
 
     /// <summary>Preview playback rate; 1 = real time.</summary>
     private double _playbackSpeed = 1.0;
@@ -291,6 +321,8 @@ public partial class MainWindow : Window
                 _glideSaveTimer.Start();
             }
         };
+
+        PartGrid.ItemsSource = _partRows;
 
         ActionGrid.ItemsSource = _actionRows;
         _actionRows.CollectionChanged += (_, _) =>
@@ -576,7 +608,13 @@ public partial class MainWindow : Window
         _scheduler.Resume();
     }
 
-    private void OnStopClick(object sender, RoutedEventArgs e) => _scheduler.Stop();
+    private void OnStopClick(object sender, RoutedEventArgs e)
+    {
+        // Also ends a running batch: the current item finishes or is cancelled,
+        // then no further pages are started.
+        StopBatch();
+        _scheduler.Stop();
+    }
 
     private void OnRescanClick(object sender, RoutedEventArgs e)
     {
@@ -1119,44 +1157,77 @@ public partial class MainWindow : Window
             return;
         }
 
-        // A bilibili collection link usually arrives without ?p=. Ask the user
-        // which page to analyse rather than silently taking P1.
-        if (BiliParts.TryGetBvid(url, out var bvid) && BiliParts.TryGetPageParam(url) is null)
+        // A collection link without ?p= belongs on the 合集分P tab, where the page
+        // list stays visible and several pages can be queued.
+        if (BiliParts.TryGetBvid(url, out var bvid) &&
+            BiliParts.TryGetPageParam(url) is null &&
+            await ShowCollectionAsync(url, bvid))
         {
-            BtnDownload.IsEnabled = false;
-            var previousStage = StatStage.Text;
-            StatStage.Text = "查询分P";
-            try
-            {
-                AppendLog($"查询分P列表: {bvid}");
-                var parts = await BiliParts.FetchAsync(bvid);
-                if (parts is { Count: > 1 })
-                {
-                    var dlg = new PickPartWindow(
-                        $"这个链接是合集，共 {parts.Count} 个分P（{bvid}）。选一个来解析：",
-                        parts) { Owner = this };
-                    if (dlg.ShowDialog() != true)
-                    {
-                        Info("已取消选择分P");
-                        return;
-                    }
-                    url = BiliParts.WithPage(url, dlg.SelectedPage);
-                    UrlBox.Text = url;
-                    AppendLog($"已选择 P{dlg.SelectedPage} → {url}");
-                }
-                else if (parts is null)
-                {
-                    AppendLog("未能取到分P列表（可能是单视频或接口受限），按单条处理");
-                }
-            }
-            finally
-            {
-                BtnDownload.IsEnabled = true;
-                StatStage.Text = previousStage;
-            }
+            return;
         }
 
         BtnDownload.IsEnabled = false;
+        try
+        {
+            if (await DownloadVideoAsync(url) is null)
+            {
+                return;
+            }
+            if (_cfg.AutoDetectMinimap)
+            {
+                await DetectCircleAsync();
+            }
+            else
+            {
+                AppendLog("已跳过自动检测小地图（开始时自动检测处于关闭状态）");
+            }
+            StartRun();
+        }
+        finally
+        {
+            BtnDownload.IsEnabled = true;
+            UpdateButtons(_scheduler.State);
+        }
+    }
+
+    /// <summary>
+    /// Switches to the 合集分P tab and fills its list.
+    /// Returns true when the link really is a collection, in which case the
+    /// caller must not download it directly.
+    /// </summary>
+    private async Task<bool> ShowCollectionAsync(string url, string bvid)
+    {
+        UrlBox.Text = url;
+        Tabs.SelectedIndex = CollectionTabIndex;
+        var previousStage = StatStage.Text;
+        StatStage.Text = "查询分P";
+        try
+        {
+            AppendLog($"查询分P列表: {bvid}");
+            var parts = await BiliParts.FetchAsync(bvid);
+            if (parts is not { Count: > 1 })
+            {
+                AppendLog("未能取到分P列表（单视频或接口受限），仍按单条处理");
+                Tabs.SelectedIndex = 0;
+                return false;
+            }
+            FillPartRows(parts);
+            TxtBatchStatus.Text = $"共 {parts.Count} 个分P（{bvid}）。勾选后点「依次处理选中」。";
+            Info($"这是合集，已在「合集分P」页列出 {parts.Count} 个分P");
+            return true;
+        }
+        finally
+        {
+            StatStage.Text = previousStage;
+        }
+    }
+
+    /// <summary>
+    /// Downloads one link and makes it the active video, invalidating everything
+    /// tied to the previous one. Returns the local path, or null on failure.
+    /// </summary>
+    private async Task<string?> DownloadVideoAsync(string url)
+    {
         BarMain.Value = 0;
         StatStage.Text = "下载";
         try
@@ -1178,13 +1249,13 @@ public partial class MainWindow : Window
                     AppendLog("--- yt-dlp 输出 ---" + Environment.NewLine + result.Tail);
                 }
                 BarMain.Value = 0;
-                return;
+                return null;
             }
 
             Info(result.Message);
 
-            // A new video invalidates everything tied to the old one: the
-            // derived output name, the recorded points and the annotations.
+            // A new video invalidates everything tied to the old one: the derived
+            // output name, the recorded points and the annotations.
             _cfg.VideoPath = result.FilePath!;
             _cfg.ApplyDerivedPaths();
             _scheduler.SetResult(null);
@@ -1193,39 +1264,226 @@ public partial class MainWindow : Window
             RefreshSettingBoxes();
             RefreshVideoRange();
             ScheduleSave();
-            // A different video means a different annotation file; pick up any
-            // that already exists for this name.
             LoadProject();
             Info($"视频已切换: {_cfg.VideoPath}");
             Info($"输出 JSON: {_cfg.OutputPath}");
 
-            // A slow codec (AV1) would make every later scrub take seconds;
-            // build the H.264 proxy now that we know which file it is.
+            // A slow codec (AV1) would make every later scrub take seconds; build
+            // the H.264 proxy now that we know which file it is.
             if (_cfg.AutoBuildProxy)
             {
                 await EnsurePreviewProxyAsync(force: false);
             }
-
-            // Only when the user asked for it: with a known-good preset the
-            // detector would silently replace it, which is exactly what they
-            // turned the flag off to prevent.
-            if (_cfg.AutoDetectMinimap)
-            {
-                await DetectCircleAsync();
-            }
-            else
-            {
-                AppendLog("已跳过自动检测小地图（开始时自动检测处于关闭状态）");
-            }
-            StartRun();
+            return _cfg.VideoPath;
         }
         catch (Exception ex)
         {
             Info("下载失败: " + ex.Message);
+            return null;
+        }
+    }
+
+    // ============================================================ 合集分P 批量
+
+    private const int CollectionTabIndex = 2;
+
+    private void FillPartRows(IReadOnlyList<BiliPart> parts)
+    {
+        _partRows.Clear();
+        foreach (var p in parts.OrderBy(x => x.Page))
+        {
+            var row = new PartRow
+            {
+                Page = p.Page,
+                Title = string.IsNullOrWhiteSpace(p.Title) ? "(无标题)" : p.Title,
+                DurationText = FormatClock(p.DurationSec)
+            };
+            row.PropertyChanged += (_, _) => UpdateBatchCount();
+            _partRows.Add(row);
+        }
+        UpdateBatchCount();
+    }
+
+    private static string FormatClock(double seconds)
+    {
+        if (seconds <= 0)
+        {
+            return string.Empty;
+        }
+        var t = TimeSpan.FromSeconds(seconds);
+        return t.TotalHours >= 1
+            ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
+            : $"{t.Minutes}:{t.Seconds:00}";
+    }
+
+    private void UpdateBatchCount()
+    {
+        if (TxtBatchCount is null)
+        {
+            return;
+        }
+        var total = _partRows.Count;
+        TxtBatchCount.Text = total == 0
+            ? string.Empty
+            : $"已勾选 {_partRows.Count(r => r.Checked)} / {total}";
+    }
+
+    private async void OnBatchQueryClick(object sender, RoutedEventArgs e)
+    {
+        var url = UrlBox.Text.Trim();
+        if (url.Length == 0)
+        {
+            Info("请先粘贴合集链接");
+            return;
+        }
+        if (!BiliParts.TryGetBvid(url, out var bvid))
+        {
+            Info("链接里没有找到 BV 号");
+            return;
+        }
+        if (BiliParts.TryGetPageParam(url) is { } single)
+        {
+            Info($"这个链接已经指定了 P{single}，直接点「下载并识别」即可");
+        }
+
+        BtnBatchQuery.IsEnabled = false;
+        try
+        {
+            AppendLog($"查询分P列表: {bvid}");
+            var parts = await BiliParts.FetchAsync(bvid);
+            if (parts is not { Count: > 1 })
+            {
+                Info("这个链接不是合集（或接口受限），按普通单视频处理即可");
+                TxtBatchStatus.Text = "没有分P可列";
+                return;
+            }
+            FillPartRows(parts);
+            TxtBatchStatus.Text = $"共 {parts.Count} 个分P（{bvid}）";
         }
         finally
         {
-            BtnDownload.IsEnabled = true;
+            BtnBatchQuery.IsEnabled = true;
+        }
+    }
+
+    private void OnBatchAllClick(object sender, RoutedEventArgs e)
+    {
+        foreach (var row in _partRows)
+        {
+            row.Checked = true;
+        }
+        UpdateBatchCount();
+    }
+
+    private void OnBatchNoneClick(object sender, RoutedEventArgs e)
+    {
+        foreach (var row in _partRows)
+        {
+            row.Checked = false;
+        }
+        UpdateBatchCount();
+    }
+
+    private void OnBatchStopClick(object sender, RoutedEventArgs e) => StopBatch();
+
+    private void StopBatch()
+    {
+        if (!_batchRunning)
+        {
+            return;
+        }
+        _batchStopping = true;
+        _scheduler.Stop();
+        TxtBatchStatus.Text = "正在停止…（当前这条结束后不再继续）";
+    }
+
+    private async void OnBatchStartClick(object sender, RoutedEventArgs e)
+    {
+        if (_scheduler.IsBusy)
+        {
+            Info("任务运行中，请先停止");
+            return;
+        }
+        var picked = _partRows.Where(r => r.Checked).OrderBy(r => r.Page).ToList();
+        if (picked.Count == 0)
+        {
+            Info("请先勾选要处理的分P");
+            return;
+        }
+        var baseUrl = UrlBox.Text.Trim();
+        if (baseUrl.Length == 0)
+        {
+            Info("请先粘贴合集链接");
+            return;
+        }
+
+        _batchRunning = true;
+        _batchStopping = false;
+        BtnBatchStart.IsEnabled = false;
+        BtnBatchStop.IsEnabled = true;
+        BtnBatchQuery.IsEnabled = false;
+        try
+        {
+            for (var i = 0; i < picked.Count && !_batchStopping; i++)
+            {
+                var part = picked[i];
+                var label = $"第 {i + 1}/{picked.Count} 个 · P{part.Page}";
+                TxtBatchStatus.Text = $"{label} · 下载中…";
+                var url = BiliParts.WithPage(baseUrl, part.Page);
+                AppendLog($"[批量 {i + 1}/{picked.Count}] P{part.Page} → {url}");
+
+                if (await DownloadVideoAsync(url) is null)
+                {
+                    AppendLog($"[批量] P{part.Page} 下载失败，跳过");
+                    continue;
+                }
+                if (_batchStopping)
+                {
+                    break;
+                }
+
+                if (_cfg.AutoDetectMinimap)
+                {
+                    await DetectCircleAsync();
+                }
+                if (_batchStopping)
+                {
+                    break;
+                }
+
+                TxtBatchStatus.Text = $"{label} · 录制中…";
+                StartRun();
+                var run = _scheduler.Completion;
+                if (run is not null)
+                {
+                    await run;
+                }
+
+                // A batch must not quietly produce empty routes: the usual cause
+                // is a segment without a minimap, or a circle that does not fit
+                // this video.
+                var matched = _scheduler.LastResult?.Points.Count ?? 0;
+                if (matched == 0)
+                {
+                    AppendLog($"[批量] P{part.Page} 一个点都没匹配到：这一段可能没有小地图，" +
+                              "或者圆心/半径不适用于这个视频（检查左侧「小地图」参数）");
+                }
+            }
+            TxtBatchStatus.Text = _batchStopping
+                ? "批量已停止"
+                : $"批量完成，共处理 {picked.Count} 个分P";
+        }
+        catch (Exception ex)
+        {
+            Info("批量处理失败: " + ex.Message);
+            TxtBatchStatus.Text = "批量失败: " + ex.Message;
+        }
+        finally
+        {
+            _batchRunning = false;
+            BtnBatchStart.IsEnabled = true;
+            BtnBatchStop.IsEnabled = false;
+            BtnBatchQuery.IsEnabled = true;
             UpdateButtons(_scheduler.State);
         }
     }

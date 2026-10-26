@@ -348,6 +348,58 @@
                         </Grid>
                     </TabItem>
 
+                    <!-- ===== 合集分P ===== -->
+                    <TabItem Header="合集分P">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="{StaticResource Muted}"
+                                       Margin="0,0,0,6"
+                                       Text="粘贴合集链接到上方「视频链接」，点「查询分P」；勾选要处理的部分（可多选），会按 P 号依次「下载 → 录制 → 导出」，每条生成自己的路线目录。处理中途可按「停止」中断。" />
+
+                            <DataGrid Grid.Row="1" x:Name="PartGrid" IsReadOnly="False">
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="选中" Width="52">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding Checked, UpdateSourceTrigger=PropertyChanged}"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="分P" Binding="{Binding PageLabel}" Width="60"
+                                                        IsReadOnly="True" />
+                                    <DataGridTextColumn Header="标题" Binding="{Binding Title}" Width="*"
+                                                        IsReadOnly="True" />
+                                    <DataGridTextColumn Header="时长" Binding="{Binding DurationText}" Width="80"
+                                                        IsReadOnly="True" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <WrapPanel Grid.Row="2" Margin="0,6,0,0">
+                                <Button x:Name="BtnBatchQuery" Content="查询分P" Click="OnBatchQueryClick" />
+                                <Button x:Name="BtnBatchAll" Content="全选" Click="OnBatchAllClick" />
+                                <Button x:Name="BtnBatchNone" Content="全不选" Click="OnBatchNoneClick" />
+                                <Button x:Name="BtnBatchStart" Content="依次处理选中"
+                                        Click="OnBatchStartClick" Style="{StaticResource PrimaryButton}" />
+                                <Button x:Name="BtnBatchStop" Content="停止批量" Click="OnBatchStopClick"
+                                        IsEnabled="False" />
+                                <TextBlock x:Name="TxtBatchCount" VerticalAlignment="Center"
+                                           Margin="10,0,0,0" FontSize="11"
+                                           Foreground="{StaticResource Muted}" Text="" />
+                            </WrapPanel>
+
+                            <TextBlock Grid.Row="3" x:Name="TxtBatchStatus" TextWrapping="Wrap"
+                                       Margin="0,6,0,0" FontSize="11"
+                                       Foreground="{StaticResource Muted}"
+                                       Text="把合集链接粘到上方「视频链接」，然后点「查询分P」" />
+                        </Grid>
+                    </TabItem>
                     <!-- ===== 滑翔窗口 ===== -->
                     <TabItem Header="滑翔窗口">
                         <Grid Margin="8">
