@@ -328,6 +328,12 @@ public partial class MainWindow : Window
     private bool _audioAvailable;
     private int _audioResyncTick;
 
+    // 播放以墙上时钟为准：解码慢就丢帧追上，而不是让画面越拖越慢、声音越跑越前。
+    private readonly System.Diagnostics.Stopwatch _playClock = new();
+    private double _playClockBase;
+    private double _videoDuration;
+    private MiniPreviewWindow? _miniPreview;
+
     // ---- background scrubbing ----
     // Seeking costs about one keyframe interval of decoding; doing it on the UI
     // thread froze the window, and queuing one seek per slider tick made it take
@@ -597,6 +603,12 @@ public partial class MainWindow : Window
     /// <summary>Starts the pipeline with the current settings.</summary>
     private void StartRun()
     {
+        // 边录边看：默认开一个小窗，显示当前录到的那一帧。
+        if (_cfg.AutoOpenMiniPreview && _miniPreview is null)
+        {
+            OpenMiniPreview();
+        }
+
         var recProgress = new Progress<RecordTick>(OnRecordTick);
         var scanProgress = new Progress<ScanTick>(OnScanTick);
         BarMain.Value = 0;
@@ -621,6 +633,59 @@ public partial class MainWindow : Window
         // then no further pages are started.
         StopBatch();
         _scheduler.Stop();
+    }
+
+    /// <summary>Opens or closes the floating monitor window.</summary>
+    private void OnMiniPreviewClick(object sender, RoutedEventArgs e)
+    {
+        if (_miniPreview is not null)
+        {
+            CloseMiniPreview();
+            return;
+        }
+        OpenMiniPreview();
+    }
+
+    private void OpenMiniPreview()
+    {
+        var path = PreviewVideoPath();
+        if (!File.Exists(path))
+        {
+            Info("还没有可预览的视频");
+            return;
+        }
+        if (_miniPreview is not null)
+        {
+            return;
+        }
+        try
+        {
+            _miniPreview = new MiniPreviewWindow(path) { Owner = this };
+            // 不设 Owner 更自由（可以盖在游戏上），但设了 Owner 才能跟着主窗口一起关。
+            _miniPreview.Owner = null;
+            _miniPreview.Closed += (_, _) => _miniPreview = null;
+            _miniPreview.Show();
+            // 立刻显示当前位置，不然窗口在第一次录制 tick 之前是空的。
+            _miniPreview.UpdatePosition(_playheadSec, "当前位置");
+        }
+        catch (Exception ex)
+        {
+            Info("打开监控窗口失败: " + ex.Message);
+            _miniPreview = null;
+        }
+    }
+
+    private void CloseMiniPreview()
+    {
+        try
+        {
+            _miniPreview?.Close();
+        }
+        catch
+        {
+            // Already gone.
+        }
+        _miniPreview = null;
     }
 
     private void OnRescanClick(object sender, RoutedEventArgs e)
@@ -841,6 +906,11 @@ public partial class MainWindow : Window
         OvSampled.Text = t.SampledFrames.ToString(CultureInfo.InvariantCulture);
         OvMatched.Text = t.MatchedFrames.ToString(CultureInfo.InvariantCulture);
         OvFailed.Text = t.FailedFrames.ToString(CultureInfo.InvariantCulture);
+
+        // 监控小窗跟着录制的进度走：显示"正在录的这一帧"对应的画面。
+        _miniPreview?.UpdatePosition(
+            t.TimeSec,
+            $"录制中 · 匹配 {t.MatchRate:P0} · 已录 {t.AcceptedPoints} 点");
     }
 
     private void OnScanTick(ScanTick t)
@@ -1280,6 +1350,8 @@ public partial class MainWindow : Window
             _cfg.VideoPath = result.FilePath!;
             _cfg.ApplyDerivedPaths();
             _scheduler.SetResult(null);
+            CloseMiniPreview();
+            _mapFitted = false;
             LoadGlideRows(Array.Empty<GlideSegment>());
             ClearActionRows();
             RefreshSettingBoxes();
@@ -1776,6 +1848,8 @@ public partial class MainWindow : Window
             var w = (int)_player.Get(VideoCaptureProperties.FrameWidth);
             var h = (int)_player.Get(VideoCaptureProperties.FrameHeight);
             var duration = _playerTotalFrames / _playerFps;
+            // 记住真实时长：「是否播到结尾」用它判断，不要用滑块最大值。
+            _videoDuration = duration;
 
             _suppressSliderCallback = true;
             CalibSlider.Maximum = Math.Max(1, duration);
@@ -1827,7 +1901,8 @@ public partial class MainWindow : Window
         try
         {
             var target = TimeSpan.FromSeconds(Math.Max(0, _playheadSec));
-            if (Math.Abs((_audio.Position - target).TotalSeconds) > 0.4)
+            // 0.25 秒以内不动它：频繁 seek 会听出爆音，而贴着画面走才是重点。
+            if (Math.Abs((_audio.Position - target).TotalSeconds) > 0.25)
             {
                 _audio.Position = target;
             }
@@ -2449,6 +2524,7 @@ public partial class MainWindow : Window
         }
         MarkStrip?.SetPlayhead(seconds);
         UpdateNowMarking();
+        _miniPreview?.UpdatePosition(seconds, null);
     }
 
     /// <summary>Clicking or dragging the annotation strip seeks the video.</summary>
@@ -2523,15 +2599,21 @@ public partial class MainWindow : Window
             }
         }
 
-        // Restart from the beginning if the playhead is already at the end.
-        var start = _playheadSec >= CalibSlider.Maximum - 0.05 ? 0 : _playheadSec;
-        var current = _playerFrame / Math.Max(1e-6, _playerFps);
-
-        if (Math.Abs(start - current) > 0.5)
+        // 用解码器自带的时长判断"已经播到结尾"，而不是滑块的最大值：
+        // 那个值在视频还没载入时是 1，会把任何位置都判成结尾，于是一点播放就回到 0。
+        var duration = _videoDuration > 0
+            ? _videoDuration
+            : _playerTotalFrames / Math.Max(1e-6, _playerFps);
+        var start = _playheadSec;
+        if (duration > 0.1 && start >= duration - 0.05)
         {
-            // Scrubbing only moves the decoder owned by the scrub worker, so
-            // the playback decoder has to be re-seated. Do it off the UI thread
-            // or the window freezes for a keyframe interval on slow codecs.
+            start = 0; // 停在结尾时再按播放，从头开始
+        }
+
+        var current = _playerFrame / Math.Max(1e-6, _playerFps);
+        if (Math.Abs(start - current) > 0.25)
+        {
+            // 定位要花一个关键帧的时间，放到后台线程，界面别僵住。
             var index = (int)Math.Clamp(
                 Math.Round(start * _playerFps), 0, Math.Max(0, _playerTotalFrames - 1));
             _isPlaying = true;
@@ -2552,7 +2634,7 @@ public partial class MainWindow : Window
                 {
                     if (!_isPlaying)
                     {
-                        return; // stopped while the seek was running
+                        return;
                     }
                     if (!ok)
                     {
@@ -2561,6 +2643,8 @@ public partial class MainWindow : Window
                         return;
                     }
                     _playerFrame = index;
+                    _playheadSec = index / Math.Max(1e-6, _playerFps);
+                    BeginPlayClock();
                     _playTimer.Start();
                     SyncAudio(true);
                 }));
@@ -2568,10 +2652,19 @@ public partial class MainWindow : Window
             return;
         }
 
-        _isPlaying = true;
-        BtnPlay.Content = "⏸ 暂停";
+        BeginPlayClock();
         _playTimer.Start();
         SyncAudio(true);
+        BtnPlay.Content = "⏸ 暂停";
+    }
+
+    /// <summary>Starts the wall clock that playback follows.</summary>
+    private void BeginPlayClock()
+    {
+        _isPlaying = true;
+        _playClockBase = _playheadSec;
+        _playClock.Restart();
+        _audioResyncTick = 0;
     }
 
     private void StopPlayback()
@@ -2592,18 +2685,46 @@ public partial class MainWindow : Window
             StopPlayback();
             return;
         }
-        using var frame = new Mat();
-        if (!_player.Read(frame) || frame.Empty())
+
+        var duration = _videoDuration > 0
+            ? _videoDuration
+            : _playerTotalFrames / Math.Max(1e-6, _playerFps);
+        // 视频应该处在的位置：起点 + 真实流逝时间 × 倍速
+        var wall = _playClockBase + _playClock.Elapsed.TotalSeconds * _playbackSpeed;
+        if (duration > 0.1 && wall >= duration)
         {
+            SetPlayhead(duration);
             StopPlayback();
             return;
         }
-        _playerFrame++;
-        ShowFrame(frame);
-        SetPlayhead(_playerFrame / _playerFps);
 
-        // MediaPlayer drifts slowly; correct it roughly once a second.
-        if (++_audioResyncTick >= 30)
+        using var frame = new Mat();
+        var shown = 0;
+        var guard = 0;
+        while (guard++ < 120)
+        {
+            var frameTime = _playerFrame / Math.Max(1e-6, _playerFps);
+            if (frameTime >= wall)
+            {
+                break;
+            }
+            if (!_player.Read(frame) || frame.Empty())
+            {
+                StopPlayback();
+                return;
+            }
+            _playerFrame++;
+            shown++;
+        }
+
+        if (shown > 0 && !frame.Empty())
+        {
+            ShowFrame(frame);
+            SetPlayhead(_playerFrame / Math.Max(1e-6, _playerFps));
+        }
+
+        // 声音是独立播放器，会慢慢漂；每 6 tick（约 0.2 秒）对一次表。
+        if (++_audioResyncTick >= 6)
         {
             _audioResyncTick = 0;
             SyncAudio(true);
@@ -3003,7 +3124,11 @@ public partial class MainWindow : Window
         Info($"点位 #{row.Index} 移到 ({row.X:F1}, {row.Y:F1})，点「重新导出」生效");
     }
 
-    private void OnMapFitClick(object sender, RoutedEventArgs e) => MapCanvas.FitToRoute();
+    private void OnMapFitClick(object sender, RoutedEventArgs e)
+    {
+        MapCanvas.FitToRoute();
+        RefreshMap(fit: false);
+    }
 
     private void OnMapZoomInClick(object sender, RoutedEventArgs e) => MapCanvas.ZoomBy(1.3);
 
@@ -3032,7 +3157,7 @@ public partial class MainWindow : Window
 
         TxtMapInfo.Text = points.Count == 0
             ? (_mapImage is null ? "未找到地图图片" : "还没有路径点")
-            : $"{points.Count} 个路径点 · {(_mapImage is null ? "无底图" : "提瓦特地图")}";
+            : $"{points.Count} 个路径点 · {(_mapImage is null ? "无底图" : "提瓦特地图")} · 缩放 ×{MapCanvas.ZoomFactor:F1}";
 
         if (fit && points.Count > 0 && !_mapFitted)
         {

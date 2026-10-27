@@ -1,0 +1,40 @@
+<Window x:Class="VideoPathTool.UI.MiniPreviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="录制监控" Width="380" Height="252"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ResizeMode="CanResizeWithGrip"
+        MinWidth="240" MinHeight="160"
+        WindowStartupLocation="Manual"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="11">
+
+    <Border Background="#0F172A" CornerRadius="6" BorderBrush="#334155" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- 标题条：拖它移动窗口 -->
+            <Border Grid.Row="0" Background="#1E293B" CornerRadius="5,5,0,0" Padding="8,4"
+                    MouseLeftButtonDown="OnBarDrag">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="✕" Click="OnCloseClick"
+                            MinWidth="0" Padding="6,0" Margin="0" FontSize="11"
+                            Background="Transparent" BorderThickness="0" Foreground="#CBD5E1"
+                            ToolTip="关闭监控窗" />
+                    <TextBlock x:Name="TxtClock" DockPanel.Dock="Right" Margin="0,0,8,0"
+                               Foreground="#93C5FD" FontWeight="SemiBold" Text="0.0s" />
+                    <TextBlock x:Name="TxtStatus" Foreground="#94A3B8" TextTrimming="CharacterEllipsis"
+                               Text="等待录制开始" />
+                </DockPanel>
+            </Border>
+
+            <Grid Grid.Row="1" Background="Black">
+                <Image x:Name="FrameImage" Stretch="Uniform" />
+                <TextBlock x:Name="TxtEmpty" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Foreground="#475569" Text="暂无画面" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

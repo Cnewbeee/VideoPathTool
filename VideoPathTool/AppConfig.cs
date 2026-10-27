@@ -224,6 +224,9 @@ public class AppConfig
     /// </summary>
     public string MapImagePath { get; set; } = "";
 
+    /// <summary>Open the floating monitor window when a run starts.</summary>
+    public bool AutoOpenMiniPreview { get; set; } = true;
+
     /// <summary>Window layout, remembered so the panel does not pop back open.</summary>
     public bool SidebarCollapsed { get; set; }
 

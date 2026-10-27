@@ -51,6 +51,9 @@ public sealed class MapView : FrameworkElement
 
     public int SelectedIndex { get; set; } = -1;
 
+    /// <summary>Current zoom factor, shown in the toolbar so the scale is obvious.</summary>
+    public double ZoomFactor => _scale;
+
     /// <summary>Raised when a marker is clicked; -1 when empty space is clicked.</summary>
     public event Action<int>? PointClicked;
 
@@ -87,7 +90,10 @@ public sealed class MapView : FrameworkElement
         var w = Math.Max(1, (maxX - minX) + pad * 2);
         var h = Math.Max(1, (maxY - minY) + pad * 2);
         _scale = Math.Min(ActualWidth / w, ActualHeight / h);
-        _scale = Math.Clamp(_scale, 0.02, 8);
+        // 底图整个提瓦特只有 5632 像素宽（1 像素约 4 游戏单位），一条几百单位的
+        // 路线本来就只有几十像素。放到 4 倍以上只会把底图糊成一片，看起来像"误差"，
+        // 所以自动适应止步于此，需要更细可以手动放大或用更高分辨率的底图。
+        _scale = Math.Clamp(_scale, 0.02, 4);
 
         var cx = (minX + maxX) / 2;
         var cy = (minY + maxY) / 2;
@@ -113,6 +119,10 @@ public sealed class MapView : FrameworkElement
     {
         dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x0F, 0x17, 0x2A)), null,
             new Rect(0, 0, ActualWidth, ActualHeight));
+
+        // 放大超过 2.5 倍时改用最近邻：宁可看到方块像素，也不要一团模糊。
+        RenderOptions.SetBitmapScalingMode(this,
+            _scale > 2.5 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality);
 
         var transform = new MatrixTransform(_scale, 0, 0, _scale, _offset.X, _offset.Y);
         dc.PushTransform(transform);
@@ -143,6 +153,15 @@ public sealed class MapView : FrameworkElement
                 : new SolidColorBrush(Color.FromRgb(0x25, 0x63, 0xEB));
             var pen = new Pen(Brushes.White, (selected ? 2.5 : 1.2) / _scale);
             dc.DrawEllipse(fill, pen, Points[i], selected ? radius * 1.8 : radius, selected ? radius * 1.8 : radius);
+
+            if (selected)
+            {
+                // 十字准星：路线压在低分辨率底图上时，唯一能精确读位置的东西。
+                var cross = new Pen(new SolidColorBrush(Color.FromRgb(0xFB, 0xBF, 0x24)), 1.5 / _scale);
+                var arm = 14 / _scale;
+                dc.DrawLine(cross, new Point(Points[i].X - arm, Points[i].Y), new Point(Points[i].X + arm, Points[i].Y));
+                dc.DrawLine(cross, new Point(Points[i].X, Points[i].Y - arm), new Point(Points[i].X, Points[i].Y + arm));
+            }
         }
 
         dc.Pop();
