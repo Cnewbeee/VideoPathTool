@@ -217,6 +217,13 @@ public class AppConfig
     /// </summary>
     public string ExportDir { get; set; } = "";
 
+    /// <summary>
+    /// Optional replacement for the map background. Any image the size of
+    /// BetterGI's Teyvat layer (5632x4864) works; empty means auto-detect,
+    /// which finds the grayscale matching map BGI ships.
+    /// </summary>
+    public string MapImagePath { get; set; } = "";
+
     /// <summary>Window layout, remembered so the panel does not pop back open.</summary>
     public bool SidebarCollapsed { get; set; }
 

@@ -96,50 +96,8 @@
 
         <!-- ============================ 主体 ============================ -->
         <Grid Margin="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="ColSettings" Width="392" MinWidth="300" />
-                <ColumnDefinition Width="16" />
-                <ColumnDefinition Width="*" MinWidth="420" />
-            </Grid.ColumnDefinitions>
-
-            <!-- 左侧：参数 -->
-            <ScrollViewer x:Name="SettingsScroll" Grid.Column="0" VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-                <StackPanel x:Name="SettingsStack" Margin="0,0,4,0">
-                    <Expander Header="视频与输出" IsExpanded="True">
-                        <StackPanel x:Name="PanelVideo" />
-                    </Expander>
-                    <Expander Header="小地图" IsExpanded="True">
-                        <StackPanel x:Name="PanelMinimap" />
-                    </Expander>
-                    <Expander Header="采样与匹配">
-                        <StackPanel x:Name="PanelMatch" />
-                    </Expander>
-                    <Expander Header="路径简化">
-                        <StackPanel x:Name="PanelPath" />
-                    </Expander>
-                    <Expander Header="滑翔检测" IsExpanded="True">
-                        <StackPanel x:Name="PanelGlide" />
-                    </Expander>
-                </StackPanel>
-            </ScrollViewer>
-
-            <!--
-              折叠把手压在分隔条上方：上半截点一下收/放，下半截拖动改宽度。
-              收起后这一列仍然在，所以恢复入口始终可见。
-            -->
-            <Grid Grid.Column="1">
-                <GridSplitter HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                              Background="{StaticResource Line}"
-                              ResizeBehavior="PreviousAndNext" ShowsPreview="False"
-                              DragCompleted="OnSidebarSplitterDragCompleted" />
-                <Button x:Name="BtnToggleSidebar" VerticalAlignment="Top" HorizontalAlignment="Center"
-                        Content="«" Style="{StaticResource SidebarHandle}"
-                        Click="OnToggleSidebarClick" />
-            </Grid>
-
             <!-- 右侧：进度 + 标签页 -->
-            <Grid Grid.Column="2" Margin="4,0,0,0">
+            <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -189,6 +147,7 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
@@ -224,11 +183,96 @@
                             <DockPanel Grid.Row="2">
                                 <TextBlock DockPanel.Dock="Top" Text="断点（传送 / 跟踪丢失）"
                                            Style="{StaticResource SectionHeader}" Margin="0,0,0,4" />
-                                <ListBox x:Name="BreakList" BorderBrush="{StaticResource Line}" FontSize="11" />
+                                <ListBox x:Name="BreakList" BorderBrush="{StaticResource Line}" FontSize="11"
+                                         MaxHeight="90" />
+                            </DockPanel>
+
+                            <!-- 导出的路径点本体：改坐标、改类型、删除都在这里 -->
+                            <DockPanel Grid.Row="3" Margin="0,10,0,0">
+                                <TextBlock DockPanel.Dock="Top" Text="路径点（可直接改坐标 / 删除）"
+                                           Style="{StaticResource SectionHeader}" Margin="0,0,0,4" />
+                                <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <Button Content="删除选中" Click="OnRemoveWaypointClick" />
+                                    <Button Content="重建路径点" Click="OnRebuildWaypointsClick"
+                                            ToolTip="按当前滑翔窗口与点位操作重新生成，会丢弃表格里的手工修改" />
+                                    <TextBlock x:Name="TxtWaypointHint" VerticalAlignment="Center"
+                                               Margin="10,0,0,0" FontSize="11"
+                                               Foreground="{StaticResource Muted}" Text="尚未录制" />
+                                </WrapPanel>
+                                <DataGrid x:Name="WaypointGrid" IsReadOnly="False" SelectionMode="Single"
+                                          MouseDoubleClick="OnWaypointGridDoubleClick">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="#" Width="42" IsReadOnly="True"
+                                                            Binding="{Binding Index}" />
+                                        <DataGridTextColumn Header="X" Width="78"
+                                                            Binding="{Binding X, UpdateSourceTrigger=LostFocus}" />
+                                        <DataGridTextColumn Header="Y" Width="78"
+                                                            Binding="{Binding Y, UpdateSourceTrigger=LostFocus}" />
+                                        <DataGridTemplateColumn Header="移动" Width="88">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <ComboBox ItemsSource="{Binding DataContext.MoveModeOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                              DisplayMemberPath="Label" SelectedValuePath="Code"
+                                                              SelectedValue="{Binding MoveMode, UpdateSourceTrigger=PropertyChanged}" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="点位类型" Width="120">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <ComboBox ItemsSource="{Binding DataContext.TypeOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                              DisplayMemberPath="Label" SelectedValuePath="Code"
+                                                              SelectedValue="{Binding Type, UpdateSourceTrigger=PropertyChanged}" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Header="动作" Width="150">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <ComboBox ItemsSource="{Binding DataContext.ActionOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                              DisplayMemberPath="Label" SelectedValuePath="Code"
+                                                              SelectedValue="{Binding Action, UpdateSourceTrigger=PropertyChanged}" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="参数" Width="90"
+                                                            Binding="{Binding ActionParams, UpdateSourceTrigger=LostFocus}" />
+                                        <DataGridTextColumn Header="时间(s)" Width="70" IsReadOnly="True"
+                                                            Binding="{Binding TimeSec, StringFormat={}{0:F1}}" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
                             </DockPanel>
                         </Grid>
                     </TabItem>
 
+
+                    <!-- ===== 地图 ===== -->
+                    <TabItem Header="地图">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <WrapPanel Grid.Row="0" Margin="0,0,0,6">
+                                <Button Content="适应路线" Click="OnMapFitClick" />
+                                <Button Content="放大" Click="OnMapZoomInClick" MinWidth="0" />
+                                <Button Content="缩小" Click="OnMapZoomOutClick" MinWidth="0" />
+                                <TextBlock x:Name="TxtMapInfo" VerticalAlignment="Center" Margin="10,0,0,0"
+                                           FontSize="11" Foreground="{StaticResource Muted}" Text="" />
+                            </WrapPanel>
+
+                            <Border Grid.Row="1" Background="#0F172A" CornerRadius="4"
+                                    BorderBrush="{StaticResource Line}" BorderThickness="1">
+                                <local:MapView x:Name="MapCanvas" />
+                            </Border>
+
+                            <TextBlock Grid.Row="2" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                                       Foreground="{StaticResource Muted}"
+                                       Text="滚轮缩放 · 拖动平移 · 单击标记选中对应点位 · 双击把选中点位挪到该处。坐标换算与 BetterGI 地图层一致（原点 4096,3072，1 像素 = 4 游戏单位）。" />
+                        </Grid>
+                    </TabItem>
                     <!-- ===== 视频与标定 ===== -->
                     <TabItem Header="视频与标定">
                         <Grid Margin="8">
@@ -568,6 +612,33 @@
                                      FontFamily="Consolas, Microsoft YaHei UI" FontSize="11"
                                      TextWrapping="NoWrap" Background="#0F172A" Foreground="#E2E8F0" />
                         </DockPanel>
+                    </TabItem>
+
+
+                    <!-- ===== 参数（低频，原来的左侧常驻栏）===== -->
+                    <TabItem Header="参数">
+                        <Grid Margin="8">
+    <ScrollViewer x:Name="SettingsScroll" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="SettingsStack" Margin="0,0,4,0">
+                        <Expander Header="视频与输出" IsExpanded="True">
+                            <StackPanel x:Name="PanelVideo" />
+                        </Expander>
+                        <Expander Header="小地图" IsExpanded="True">
+                            <StackPanel x:Name="PanelMinimap" />
+                        </Expander>
+                        <Expander Header="采样与匹配">
+                            <StackPanel x:Name="PanelMatch" />
+                        </Expander>
+                        <Expander Header="路径简化">
+                            <StackPanel x:Name="PanelPath" />
+                        </Expander>
+                        <Expander Header="滑翔检测" IsExpanded="True">
+                            <StackPanel x:Name="PanelGlide" />
+                        </Expander>
+                    </StackPanel>
+                </ScrollViewer>
+                        </Grid>
                     </TabItem>
 
                 </TabControl>

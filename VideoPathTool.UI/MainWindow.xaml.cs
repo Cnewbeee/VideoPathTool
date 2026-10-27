@@ -83,6 +83,59 @@ public sealed class GlideRow : INotifyPropertyChanged
 /// <summary>
 /// One page of a bilibili collection, bound to the 合集分P grid.
 /// </summary>
+/// <summary>
+/// One exported waypoint, editable in the 概览 table. A plain copy of
+/// <see cref="ProcessedPoint"/> so the grid can edit values the pipeline would
+/// otherwise recompute on the next export.
+/// </summary>
+public sealed class WaypointRow : INotifyPropertyChanged
+{
+    private int _index;
+    private double _x;
+    private double _y;
+    private string _type = "path";
+    private string _moveMode = "run";
+    private string _action = "";
+    private string _actionParams = "";
+
+    public int Index { get => _index; set { _index = value; Raise(nameof(Index)); } }
+    public double X { get => _x; set { _x = value; Raise(nameof(X)); } }
+    public double Y { get => _y; set { _y = value; Raise(nameof(Y)); } }
+    public string Type { get => _type; set { _type = value ?? "path"; Raise(nameof(Type)); } }
+    public string MoveMode { get => _moveMode; set { _moveMode = value ?? "run"; Raise(nameof(MoveMode)); } }
+    public string Action { get => _action; set { _action = value ?? ""; Raise(nameof(Action)); } }
+    public string ActionParams { get => _actionParams; set { _actionParams = value ?? ""; Raise(nameof(ActionParams)); } }
+    public double TimeSec { get; init; }
+
+    public ProcessedPoint ToPoint() => new()
+    {
+        X = X,
+        Y = Y,
+        Type = string.IsNullOrWhiteSpace(Type) ? "path" : Type,
+        MoveMode = string.IsNullOrWhiteSpace(MoveMode) ? "run" : MoveMode,
+        Action = Action,
+        ActionParams = ActionParams,
+        TimeSec = TimeSec
+    };
+
+    public static WaypointRow From(ProcessedPoint p, int index) => new()
+    {
+        Index = index,
+        X = p.X,
+        Y = p.Y,
+        Type = p.Type,
+        MoveMode = p.MoveMode,
+        Action = p.Action ?? "",
+        ActionParams = p.ActionParams ?? "",
+        TimeSec = p.TimeSec
+    };
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void Raise(string name) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+}
+
 public sealed class PartRow : INotifyPropertyChanged
 {
     private bool _checked;
@@ -258,6 +311,12 @@ public partial class MainWindow : Window
     private double? _glideMarkStart;
 
     // ---- 合集批量处理 ----
+    // ---- 路径点表格 / 地图 ----
+    private readonly ObservableCollection<WaypointRow> _waypointRows = new();
+    private bool _waypointsEdited;
+    private BitmapSource? _mapImage;
+    private bool _mapFitted;
+
     private bool _batchRunning;
     private bool _batchStopping;
 
@@ -323,6 +382,10 @@ public partial class MainWindow : Window
         };
 
         PartGrid.ItemsSource = _partRows;
+        WaypointGrid.ItemsSource = _waypointRows;
+        WaypointGrid.SelectionChanged += (_, _) => SyncMapSelection();
+        MapCanvas.PointClicked += OnMapPointClicked;
+        MapCanvas.MapDoubleClicked += OnMapDoubleClicked;
 
         ActionGrid.ItemsSource = _actionRows;
         _actionRows.CollectionChanged += (_, _) =>
@@ -356,11 +419,6 @@ public partial class MainWindow : Window
         WireScheduler();
 
         // Restore the remembered panel layout.
-        _sidebarCollapsed = _cfg.SidebarCollapsed;
-        if (_cfg.SidebarWidth >= SidebarMinWidth)
-        {
-            _sidebarWidth = _cfg.SidebarWidth;
-        }
         ApplySidebarState();
 
         TxtConfigPath.Text = "配置: " + _configPath;
@@ -390,80 +448,29 @@ public partial class MainWindow : Window
 
     // ============================================================ 侧边栏折叠
 
-    /// <summary>
-    /// Applies the remembered layout. The collapsed column keeps its slot at
-    /// width 0 so the handle that brings it back never moves out from under the
-    /// cursor, and the splitter still works to widen it directly.
-    /// </summary>
+    // 参数面板从常驻左栏改成标签页：它改得少，却一直占着将近三分之一的宽度。
+    // 现在内容区拿满宽度，Ctrl+B / 「☰ 参数」在它和上一个标签页之间来回跳。
+    private const int ParamsTabIndex = 7;
+    private int _lastContentTab;
+
+    /// <summary>Kept because the constructor calls it before the window is wired.</summary>
     private void ApplySidebarState()
     {
-        if (ColSettings is null || BtnToggleSidebar is null)
-        {
-            return;
-        }
-
-        if (_sidebarCollapsed)
-        {
-            ColSettings.MinWidth = 0;
-            ColSettings.Width = new GridLength(0);
-            SettingsScroll.Visibility = Visibility.Collapsed;
-            BtnToggleSidebar.Content = "»";
-            BtnToggleSidebar.ToolTip = "展开参数面板（Ctrl+B）";
-            if (BtnSidebar is not null)
-            {
-                BtnSidebar.Foreground = (System.Windows.Media.Brush)FindResource("Accent");
-            }
-        }
-        else
-        {
-            ColSettings.MinWidth = SidebarMinWidth;
-            ColSettings.Width = new GridLength(Math.Max(SidebarMinWidth, _sidebarWidth));
-            SettingsScroll.Visibility = Visibility.Visible;
-            BtnToggleSidebar.Content = "«";
-            BtnToggleSidebar.ToolTip = "折叠参数面板（Ctrl+B）";
-            if (BtnSidebar is not null)
-            {
-                BtnSidebar.ClearValue(ForegroundProperty);
-            }
-        }
     }
 
     private void OnToggleSidebarClick(object sender, RoutedEventArgs e) => ToggleSidebar();
 
-    /// <summary>
-    /// Dragging the splitter while collapsed should bring the panel back:
-    /// otherwise the column would reappear with the handle still pointing the
-    /// wrong way.
-    /// </summary>
-    private void OnSidebarSplitterDragCompleted(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e)
+    private void ToggleSidebar()
     {
-        if (ColSettings.ActualWidth > 60)
+        if (Tabs.SelectedIndex == ParamsTabIndex)
         {
-            _sidebarCollapsed = false;
-            _sidebarWidth = ColSettings.ActualWidth;
+            Tabs.SelectedIndex = _lastContentTab;
         }
         else
         {
-            _sidebarCollapsed = true;
+            _lastContentTab = Tabs.SelectedIndex;
+            Tabs.SelectedIndex = ParamsTabIndex;
         }
-        ApplySidebarState();
-        _cfg.SidebarCollapsed = _sidebarCollapsed;
-        _cfg.SidebarWidth = _sidebarWidth;
-        ScheduleSave();
-    }
-
-    private void ToggleSidebar()
-    {
-        if (!_sidebarCollapsed && ColSettings.ActualWidth >= SidebarMinWidth)
-        {
-            // Read the width before it collapses to zero.
-            _sidebarWidth = ColSettings.ActualWidth;
-        }
-        _sidebarCollapsed = !_sidebarCollapsed;
-        ApplySidebarState();
-        _cfg.SidebarCollapsed = _sidebarCollapsed;
-        _cfg.SidebarWidth = _sidebarWidth;
-        ScheduleSave();
     }
 
     /// <summary>
@@ -646,7 +653,19 @@ public partial class MainWindow : Window
             using var pipeline = new RecordingPipeline(_cfg, AppendLog);
             var windows = _glideRows.Where(r => r.Enabled).Select(r => r.ToSegment()).ToList();
             var actions = _actionRows.Where(r => r.Enabled).Select(r => r.ToAction()).ToList();
-            var waypoints = pipeline.BuildWaypoints(result, windows, actions);
+            List<ProcessedPoint> waypoints;
+            if (_waypointsEdited)
+            {
+                // The table is authoritative once the user touched it: rebuilding
+                // would silently throw those edits away.
+                result.Waypoints = _waypointRows.Select(r => r.ToPoint()).ToList();
+                waypoints = result.Waypoints;
+                AppendLog($"路径点按表格内容导出（{waypoints.Count} 个，未重新生成）");
+            }
+            else
+            {
+                waypoints = pipeline.BuildWaypoints(result, windows, actions);
+            }
             pipeline.SaveJson(result);
             pipeline.SaveCsv(result);
             result.Glides = windows;
@@ -870,6 +889,8 @@ public partial class MainWindow : Window
         {
             WarnBanner.Visibility = Visibility.Collapsed;
         }
+
+        RefreshWaypoints(result);
     }
 
     // ============================================================ 工程文件（存档/恢复）
@@ -1285,7 +1306,8 @@ public partial class MainWindow : Window
 
     // ============================================================ 合集分P 批量
 
-    private const int CollectionTabIndex = 4;
+    private const int CollectionTabIndex = 5;
+    private const int VideoTabIndex = 2;
 
     private void FillPartRows(IReadOnlyList<BiliPart> parts)
     {
@@ -1594,7 +1616,7 @@ public partial class MainWindow : Window
         {
             return;
         }
-        Tabs.SelectedIndex = 1;
+        Tabs.SelectedIndex = VideoTabIndex;
         StopPlayback();
         SeekTo(row.TimeSec);
     }
@@ -2764,7 +2786,7 @@ public partial class MainWindow : Window
         {
             return;
         }
-        Tabs.SelectedIndex = 1;
+        Tabs.SelectedIndex = VideoTabIndex;
         StopPlayback();
         SeekTo(row.StartSec);
     }
@@ -2837,6 +2859,256 @@ public partial class MainWindow : Window
                             $"半径={_cfg.MinimapRadius}   裁剪比例={_cfg.CropRatio}";
     }
 
+    // ============================================================ 路径点表格 / 地图
+
+    /// <summary>Rebuilds the editable waypoint table from a result.</summary>
+    private void RefreshWaypoints(PipelineResult? result)
+    {
+        _waypointsEdited = false;
+        _waypointRows.Clear();
+        if (result is not null)
+        {
+            var index = 1;
+            foreach (var wp in result.Waypoints)
+            {
+                var row = WaypointRow.From(wp, index++);
+                row.PropertyChanged += OnWaypointRowChanged;
+                _waypointRows.Add(row);
+            }
+        }
+        UpdateWaypointHint();
+        RefreshMap(fit: true);
+    }
+
+    private void OnWaypointRowChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        _waypointsEdited = true;
+        UpdateWaypointHint();
+        if (e.PropertyName is nameof(WaypointRow.X) or nameof(WaypointRow.Y) or nameof(WaypointRow.Type))
+        {
+            RefreshMap(fit: false);
+        }
+    }
+
+    private void UpdateWaypointHint()
+    {
+        if (TxtWaypointHint is null)
+        {
+            return;
+        }
+        var fly = _waypointRows.Count(r => r.MoveMode == "fly");
+        TxtWaypointHint.Text = _waypointRows.Count == 0
+            ? "尚未录制"
+            : _waypointsEdited
+                ? $"{_waypointRows.Count} 个点（含 fly {fly}）· 已手工修改，点「重新导出」写入 JSON"
+                : $"{_waypointRows.Count} 个点（含 fly {fly}）· 改坐标或删除后点「重新导出」";
+    }
+
+    private void RenumberWaypoints()
+    {
+        for (var i = 0; i < _waypointRows.Count; i++)
+        {
+            _waypointRows[i].Index = i + 1;
+        }
+    }
+
+    private void OnRemoveWaypointClick(object sender, RoutedEventArgs e)
+    {
+        if (WaypointGrid.SelectedItem is not WaypointRow row)
+        {
+            Info("请先在表格里选中要删除的点位");
+            return;
+        }
+        _waypointRows.Remove(row);
+        RenumberWaypoints();
+        _waypointsEdited = true;
+        UpdateWaypointHint();
+        RefreshMap(fit: false);
+        AppendLog($"已从表格删除点位（原 #{row.Index}）；点「重新导出」生效");
+    }
+
+    /// <summary>
+    /// Throws away table edits and regenerates the waypoints from the current
+    /// glide windows and point actions.
+    /// </summary>
+    private void OnRebuildWaypointsClick(object sender, RoutedEventArgs e)
+    {
+        var result = _scheduler.LastResult;
+        if (result is null)
+        {
+            Info("还没有录制结果，无法重建");
+            return;
+        }
+        try
+        {
+            using var pipeline = new RecordingPipeline(_cfg, AppendLog);
+            var windows = _glideRows.Where(r => r.Enabled).Select(r => r.ToSegment()).ToList();
+            var actions = _actionRows.Where(r => r.Enabled).Select(r => r.ToAction()).ToList();
+            var waypoints = pipeline.BuildWaypoints(result, windows, actions);
+            result.Glides = windows;
+            result.Actions = actions;
+            RefreshWaypoints(result);
+            RefreshStats(result);
+            Info($"已重建路径点 {waypoints.Count} 个（表格里的手工修改已丢弃）");
+        }
+        catch (Exception ex)
+        {
+            Info("重建路径点失败: " + ex.Message);
+        }
+    }
+
+    private void OnWaypointGridDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (WaypointGrid.SelectedItem is not WaypointRow row)
+        {
+            return;
+        }
+        Tabs.SelectedIndex = VideoTabIndex;
+        SeekTo(row.TimeSec);
+        Info($"跳到点位 #{row.Index} 的画面：{row.TimeSec:F1}s");
+    }
+
+    // ---- 地图 ----
+
+    private void SyncMapSelection()
+    {
+        MapCanvas.SelectedIndex = WaypointGrid.SelectedIndex;
+        MapCanvas.InvalidateVisual();
+    }
+
+    private void OnMapPointClicked(int index)
+    {
+        WaypointGrid.SelectedIndex = index;
+        if (index >= 0 && index < _waypointRows.Count)
+        {
+            WaypointGrid.ScrollIntoView(_waypointRows[index]);
+            TxtMapInfo.Text = $"点位 #{_waypointRows[index].Index}（{_waypointRows[index].X:F1}, {_waypointRows[index].Y:F1}）";
+        }
+        SyncMapSelection();
+    }
+
+    private void OnMapDoubleClicked(Point mapPixel)
+    {
+        if (WaypointGrid.SelectedItem is not WaypointRow row)
+        {
+            Info("先在上面的表格里选一个点位，再双击地图把它的坐标挪过去");
+            return;
+        }
+        var (gx, gy) = MapView.ToGameCoord(mapPixel);
+        row.X = Math.Round(gx, 1);
+        row.Y = Math.Round(gy, 1);
+        _waypointsEdited = true;
+        UpdateWaypointHint();
+        RefreshMap(fit: false);
+        Info($"点位 #{row.Index} 移到 ({row.X:F1}, {row.Y:F1})，点「重新导出」生效");
+    }
+
+    private void OnMapFitClick(object sender, RoutedEventArgs e) => MapCanvas.FitToRoute();
+
+    private void OnMapZoomInClick(object sender, RoutedEventArgs e) => MapCanvas.ZoomBy(1.3);
+
+    private void OnMapZoomOutClick(object sender, RoutedEventArgs e) => MapCanvas.ZoomBy(1 / 1.3);
+
+    /// <summary>Pushes the current waypoints onto the map, loading the image once.</summary>
+    private void RefreshMap(bool fit)
+    {
+        if (MapCanvas is null || TxtMapInfo is null)
+        {
+            return;
+        }
+        EnsureMapLoaded();
+
+        var points = new List<Point>(_waypointRows.Count);
+        var teleports = new List<bool>(_waypointRows.Count);
+        foreach (var row in _waypointRows)
+        {
+            points.Add(MapView.ToMapPixel(row.X, row.Y));
+            teleports.Add(row.Type == "teleport");
+        }
+        MapCanvas.Points = points;
+        MapCanvas.IsTeleport = teleports;
+        MapCanvas.SelectedIndex = WaypointGrid.SelectedIndex;
+        MapCanvas.InvalidateVisual();
+
+        TxtMapInfo.Text = points.Count == 0
+            ? (_mapImage is null ? "未找到地图图片" : "还没有路径点")
+            : $"{points.Count} 个路径点 · {(_mapImage is null ? "无底图" : "提瓦特地图")}";
+
+        if (fit && points.Count > 0 && !_mapFitted)
+        {
+            MapCanvas.FitToRoute();
+            _mapFitted = true;
+        }
+    }
+
+    private void EnsureMapLoaded()
+    {
+        if (_mapImage is not null)
+        {
+            return;
+        }
+        var path = ResolveMapImagePath();
+        if (path is null)
+        {
+            return;
+        }
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.UriSource = new Uri(path);
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            // Full resolution: the map is grayscale with fine terrain detail and
+            // is viewed at roughly 1:1 when zoomed onto a route, where a
+            // half-size decode looked visibly soft (~110 MB decoded, one-off).
+            bitmap.EndInit();
+            bitmap.Freeze();
+            _mapImage = bitmap;
+            MapCanvas.LoadMap(bitmap);
+        }
+        catch (Exception ex)
+        {
+            TxtMapInfo.Text = "地图加载失败: " + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Looks for the Teyvat map image. BetterGI ships the same file, so the
+    /// BGI asset folder is a candidate as well.
+    /// </summary>
+    private string? ResolveMapImagePath()
+    {
+        const string relative = @"assets\map\contentFiles\any\any\Assets\Map\Teyvat\Teyvat_0_256.png";
+        var candidates = new[]
+        {
+            _cfg.MapImagePath,
+            Path.Combine(AppContext.BaseDirectory, "Teyvat_0_256.png"),
+            Path.Combine(AppPaths.VideoRoot, "..", relative),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", relative),
+            Path.Combine(@"F:\GENSHIN1", relative)
+        };
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+            try
+            {
+                var full = Path.GetFullPath(candidate);
+                if (File.Exists(full))
+                {
+                    return full;
+                }
+            }
+            catch
+            {
+                // Malformed candidate: try the next one.
+            }
+        }
+        return null;
+    }
+
     // ============================================================ 参数面板
 
     private void BuildSettings()
@@ -2867,6 +3139,14 @@ public partial class MainWindow : Window
         AddPath(PanelVideo, "导出目录", () => _cfg.ExportDir, v => _cfg.ExportDir = v, string.Empty,
             hint: "「导出到…」默认打开这里，可指向 BetterGI 的 AutoPathing 目录；留空则从路线目录开始",
             folder: true);
+        AddPath(PanelVideo, "地图图片", () => _cfg.MapImagePath, v =>
+        {
+            _cfg.MapImagePath = v;
+            _mapImage = null;
+            _mapFitted = false;
+            RefreshMap(fit: true);
+        }, "图片|*.png;*.jpg;*.jpeg|所有文件|*.*",
+            hint: "「地图」页底图，需与 BetterGI 的 5632x4864 图层同尺寸；留空则自动用灰度匹配图");
 
         AddText(PanelVideo, "路线名", () => _cfg.RouteName, v =>
         {
@@ -3253,12 +3533,8 @@ public partial class MainWindow : Window
         _glideSaveTimer.Stop();
         ClosePlayer();
         SaveProject();
-        // Remember the splitter width too, not just the collapsed flag.
-        if (!_sidebarCollapsed && ColSettings.ActualWidth >= SidebarMinWidth)
-        {
-            _cfg.SidebarWidth = ColSettings.ActualWidth;
-        }
-        _cfg.SidebarCollapsed = _sidebarCollapsed;
+        // 参数面板不再是常驻列，这两个字段只为兼容旧配置保留。
+        _cfg.SidebarCollapsed = false;
         TrySaveConfig();
 
         try { _audio.Close(); } catch { }
