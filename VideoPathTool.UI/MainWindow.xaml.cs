@@ -364,7 +364,7 @@ public partial class MainWindow : Window
         ApplySidebarState();
 
         TxtConfigPath.Text = "配置: " + _configPath;
-        TxtDownloadDir.Text = "下载目录: " + _cfg.DownloadDir;
+        BtnOpenDownload.ToolTip = "打开下载目录: " + _cfg.DownloadDir;
         UpdateButtons(SchedulerState.Idle);
         Loaded += OnLoaded;
     }
@@ -1285,7 +1285,7 @@ public partial class MainWindow : Window
 
     // ============================================================ 合集分P 批量
 
-    private const int CollectionTabIndex = 2;
+    private const int CollectionTabIndex = 4;
 
     private void FillPartRows(IReadOnlyList<BiliPart> parts)
     {
@@ -1485,6 +1485,19 @@ public partial class MainWindow : Window
             BtnBatchStop.IsEnabled = false;
             BtnBatchQuery.IsEnabled = true;
             UpdateButtons(_scheduler.State);
+        }
+    }
+
+    /// <summary>
+    /// Opens the 合集分P page. If a link is already pasted and the list is empty,
+    /// query it right away - the button then means "show me the pages".
+    /// </summary>
+    private void OnOpenPartsClick(object sender, RoutedEventArgs e)
+    {
+        Tabs.SelectedIndex = CollectionTabIndex;
+        if (_partRows.Count == 0 && BiliParts.TryGetBvid(UrlBox.Text, out _))
+        {
+            OnBatchQueryClick(sender, e);
         }
     }
 
@@ -2846,12 +2859,11 @@ public partial class MainWindow : Window
 
         AddPath(PanelVideo, "下载目录", () => _cfg.DownloadDir, _ => { }, string.Empty,
             readOnly: true, hint: $"固定目录 {AppPaths.DownloadDir}，粘贴链接下载时使用");
-        AddPath(PanelVideo, "输出 JSON", () => _cfg.OutputPath, _ => { }, string.Empty,
-            readOnly: true, hint: "每个视频一个 JSON，放在 routes\\<视频名>\\ 下");
-        AddPath(PanelVideo, "调试 CSV", () => _cfg.DebugCsvPath, _ => { }, string.Empty,
-            readOnly: true, hint: "同目录 debug.csv，用于免重录重建");
-        AddPath(PanelVideo, "工程文件", () => _cfg.ProjectPath, _ => { }, string.Empty,
-            readOnly: true, hint: "同目录 project.json，保存滑翔窗口与点位操作");
+        // 三条派生路径合成一行：debug.csv 与 project.json 永远和 JSON 同目录，
+        // 让它们各占一行只会把真正要改的参数挤到看不见的地方。
+        AddPath(PanelVideo, "输出文件", () => _cfg.OutputPath, _ => { }, string.Empty,
+            readOnly: true,
+            hint: "每个视频一个目录；同目录还有 debug.csv 与 project.json");
         AddPath(PanelVideo, "导出目录", () => _cfg.ExportDir, v => _cfg.ExportDir = v, string.Empty,
             hint: "「导出到…」默认打开这里，可指向 BetterGI 的 AutoPathing 目录；留空则从路线目录开始",
             folder: true);

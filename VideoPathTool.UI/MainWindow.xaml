@@ -14,32 +14,43 @@
         <Border DockPanel.Dock="Top" Background="White" BorderBrush="{StaticResource Line}"
                 BorderThickness="0,0,0,1" Padding="10,8">
             <StackPanel>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="BtnStart" Content="▶ 开始" Style="{StaticResource PrimaryButton}"
-                            Click="OnStartClick" ToolTip="加载地图并完整跑一遍：录制 → 滑翔 → 导出" />
-                    <Button x:Name="BtnPause" Content="⏸ 暂停" Click="OnPauseClick"
-                            ToolTip="在下一帧处挂起，不丢已录数据" />
-                    <Button x:Name="BtnResume" Content="▶ 继续" Click="OnResumeClick"
-                            ToolTip="按当前参数继续（参数改动会生效）" />
-                    <Button x:Name="BtnStop" Content="⏹ 停止" Click="OnStopClick"
-                            ToolTip="取消本次运行" />
-                    <Separator Margin="8,0" />
-                    <Button x:Name="BtnRescan" Content="重扫滑翔" Click="OnRescanClick"
-                            ToolTip="不重录位置，只重新检测滑翔窗口" />
-                    <Button x:Name="BtnExport" Content="重新导出" Click="OnExportClick"
-                            ToolTip="用当前滑翔窗口、点位操作与简化参数重新生成 JSON（瞬时完成）" />
-                    <Button x:Name="BtnExportTo" Content="导出到…" Click="OnExportToClick"
-                            ToolTip="把这份路线另存到指定目录（例如 BetterGI 的 AutoPathing）；不影响工程内的正式 JSON" />
-                    <Button x:Name="BtnLoadCsv" Content="载入 CSV" Click="OnLoadCsvClick"
-                            ToolTip="从调试 CSV 重建，完全不读视频；配合重新导出可反复微调" />
-                    <Separator Margin="8,0" />
-                    <TextBlock x:Name="TxtState" Text="空闲" FontWeight="SemiBold"
-                               Foreground="{StaticResource Muted}" Margin="4,0,0,0" />
-                    <Separator Margin="8,0" />
-                    <Button x:Name="BtnSidebar" Content="☰ 参数" Click="OnToggleSidebarClick"
-                            ToolTip="显示 / 隐藏左侧参数面板（Ctrl+B）" MinWidth="0" />
-                </StackPanel>
 
+                <!--
+                  第一行：左边是「运行」(做这件事)，右边是「收尾」(做完之后)。
+                  中间只放状态，避免一眼看过去全是同等重要的按钮。
+                -->
+                <DockPanel LastChildFill="False">
+                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="BtnStart" Content="▶ 开始" Style="{StaticResource PrimaryButton}"
+                                Click="OnStartClick" ToolTip="加载地图并完整跑一遍：录制 → 滑翔 → 导出" />
+                        <Button x:Name="BtnPause" Content="⏸ 暂停" Click="OnPauseClick"
+                                ToolTip="在下一帧处挂起，不丢已录数据" />
+                        <Button x:Name="BtnResume" Content="▶ 继续" Click="OnResumeClick"
+                                ToolTip="按当前参数继续（参数改动会生效）" />
+                        <Button x:Name="BtnStop" Content="⏹ 停止" Click="OnStopClick"
+                                ToolTip="取消本次运行" />
+                        <Separator Margin="8,0" />
+                        <TextBlock x:Name="TxtState" Text="空闲" FontWeight="SemiBold"
+                                   Foreground="{StaticResource Muted}" Margin="4,0,0,0" />
+                    </StackPanel>
+
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="BtnRescan" Content="重扫滑翔" Click="OnRescanClick"
+                                ToolTip="不重录位置，只重新检测滑翔窗口" />
+                        <Button x:Name="BtnLoadCsv" Content="载入 CSV" Click="OnLoadCsvClick"
+                                ToolTip="从调试 CSV 重建，完全不读视频；配合重新导出可反复微调" />
+                        <Separator Margin="8,0" />
+                        <Button x:Name="BtnExport" Content="重新导出" Click="OnExportClick"
+                                ToolTip="用当前滑翔窗口、点位操作与简化参数重新生成 JSON（瞬时完成）" />
+                        <Button x:Name="BtnExportTo" Content="导出到…" Click="OnExportToClick"
+                                ToolTip="把这份路线另存到指定目录（例如 BetterGI 的 AutoPathing）；不影响工程内的正式 JSON" />
+                        <Separator Margin="8,0" />
+                        <Button x:Name="BtnSidebar" Content="☰ 参数" Click="OnToggleSidebarClick"
+                                ToolTip="显示 / 隐藏左侧参数面板（Ctrl+B）" MinWidth="0" />
+                    </StackPanel>
+                </DockPanel>
+
+                <!-- 第二行：视频从哪来（链接 / 本地文件 / 合集） -->
                 <Border Margin="0,8,0,0" Padding="0,8,0,0"
                         BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0">
                     <Grid>
@@ -54,14 +65,14 @@
                         <TextBlock Grid.Column="0" Text="视频链接" VerticalAlignment="Center"
                                    Margin="0,0,8,0" Foreground="{StaticResource Muted}" />
                         <TextBox x:Name="UrlBox" Grid.Column="1" VerticalContentAlignment="Center"
-                                 ToolTip="支持 B 站等站点；下载完成后自动填入视频路径并可直接开始识别" />
+                                 ToolTip="支持 B 站等站点；合集链接会跳到「合集分P」页挑选，单视频直接下载" />
                         <Button x:Name="BtnDownload" Grid.Column="2" Content="下载并识别"
                                 Click="OnDownloadClick" Style="{StaticResource PrimaryButton}"
                                 ToolTip="下载到固定目录，然后立刻开始录制" />
-                        <TextBlock x:Name="TxtDownloadDir" Grid.Column="3" VerticalAlignment="Center"
-                                   Margin="10,0,8,0" FontSize="11" Foreground="{StaticResource Muted}"
-                                   TextTrimming="CharacterEllipsis" MaxWidth="380" />
-                        <Button x:Name="BtnOpenDownload" Grid.Column="4" Content="打开目录"
+                        <Button x:Name="BtnOpenParts" Grid.Column="3" Content="分P列表"
+                                Click="OnOpenPartsClick"
+                                ToolTip="打开「合集分P」页，批量处理一个合集的多个分P" />
+                        <Button x:Name="BtnOpenDownload" Grid.Column="4" Content="打开下载目录"
                                 Click="OnOpenDownloadClick" MinWidth="0" />
                     </Grid>
                 </Border>
@@ -139,7 +150,7 @@
                         BorderThickness="1" CornerRadius="4" Padding="12,10" Margin="0,0,0,8">
                     <StackPanel>
                         <ProgressBar x:Name="BarMain" Height="8" Minimum="0" Maximum="1" Value="0" />
-                        <UniformGrid Columns="6" Margin="0,10,0,0">
+                        <UniformGrid Columns="5" Margin="0,10,0,0">
                             <StackPanel>
                                 <TextBlock Text="阶段" Style="{StaticResource Caption}" />
                                 <TextBlock x:Name="StatStage" Text="—" Style="{StaticResource StatValue}" FontSize="14" />
@@ -157,12 +168,14 @@
                                 <TextBlock x:Name="StatPoints" Text="0" Style="{StaticResource StatValue}" FontSize="14" />
                             </StackPanel>
                             <StackPanel>
-                                <TextBlock Text="已用" Style="{StaticResource Caption}" />
-                                <TextBlock x:Name="StatElapsed" Text="0 s" Style="{StaticResource StatValue}" FontSize="14" />
-                            </StackPanel>
-                            <StackPanel>
-                                <TextBlock Text="预计剩余" Style="{StaticResource Caption}" />
-                                <TextBlock x:Name="StatEta" Text="—" Style="{StaticResource StatValue}" FontSize="14" />
+                                <TextBlock Text="已用 / 剩余" Style="{StaticResource Caption}" />
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="StatElapsed" Text="0 s" Style="{StaticResource StatValue}" FontSize="14" />
+                                    <TextBlock Text=" / " VerticalAlignment="Center"
+                                               Foreground="{StaticResource Muted}" FontSize="14" />
+                                    <TextBlock x:Name="StatEta" Text="—" Style="{StaticResource StatValue}"
+                                               FontSize="14" Foreground="{StaticResource Muted}" />
+                                </StackPanel>
                             </StackPanel>
                         </UniformGrid>
                     </StackPanel>
@@ -348,58 +361,6 @@
                         </Grid>
                     </TabItem>
 
-                    <!-- ===== 合集分P ===== -->
-                    <TabItem Header="合集分P">
-                        <Grid Margin="8">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="{StaticResource Muted}"
-                                       Margin="0,0,0,6"
-                                       Text="粘贴合集链接到上方「视频链接」，点「查询分P」；勾选要处理的部分（可多选），会按 P 号依次「下载 → 录制 → 导出」，每条生成自己的路线目录。处理中途可按「停止」中断。" />
-
-                            <DataGrid Grid.Row="1" x:Name="PartGrid" IsReadOnly="False">
-                                <DataGrid.Columns>
-                                    <DataGridTemplateColumn Header="选中" Width="52">
-                                        <DataGridTemplateColumn.CellTemplate>
-                                            <DataTemplate>
-                                                <CheckBox IsChecked="{Binding Checked, UpdateSourceTrigger=PropertyChanged}"
-                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </DataTemplate>
-                                        </DataGridTemplateColumn.CellTemplate>
-                                    </DataGridTemplateColumn>
-                                    <DataGridTextColumn Header="分P" Binding="{Binding PageLabel}" Width="60"
-                                                        IsReadOnly="True" />
-                                    <DataGridTextColumn Header="标题" Binding="{Binding Title}" Width="*"
-                                                        IsReadOnly="True" />
-                                    <DataGridTextColumn Header="时长" Binding="{Binding DurationText}" Width="80"
-                                                        IsReadOnly="True" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-
-                            <WrapPanel Grid.Row="2" Margin="0,6,0,0">
-                                <Button x:Name="BtnBatchQuery" Content="查询分P" Click="OnBatchQueryClick" />
-                                <Button x:Name="BtnBatchAll" Content="全选" Click="OnBatchAllClick" />
-                                <Button x:Name="BtnBatchNone" Content="全不选" Click="OnBatchNoneClick" />
-                                <Button x:Name="BtnBatchStart" Content="依次处理选中"
-                                        Click="OnBatchStartClick" Style="{StaticResource PrimaryButton}" />
-                                <Button x:Name="BtnBatchStop" Content="停止批量" Click="OnBatchStopClick"
-                                        IsEnabled="False" />
-                                <TextBlock x:Name="TxtBatchCount" VerticalAlignment="Center"
-                                           Margin="10,0,0,0" FontSize="11"
-                                           Foreground="{StaticResource Muted}" Text="" />
-                            </WrapPanel>
-
-                            <TextBlock Grid.Row="3" x:Name="TxtBatchStatus" TextWrapping="Wrap"
-                                       Margin="0,6,0,0" FontSize="11"
-                                       Foreground="{StaticResource Muted}"
-                                       Text="把合集链接粘到上方「视频链接」，然后点「查询分P」" />
-                        </Grid>
-                    </TabItem>
                     <!-- ===== 滑翔窗口 ===== -->
                     <TabItem Header="滑翔窗口">
                         <Grid Margin="8">
@@ -542,6 +503,58 @@
                         </Grid>
                     </TabItem>
 
+                    <!-- ===== 合集分P ===== -->
+                    <TabItem Header="合集分P">
+                        <Grid Margin="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="{StaticResource Muted}"
+                                       Margin="0,0,0,6"
+                                       Text="粘贴合集链接到上方「视频链接」，点「查询分P」；勾选要处理的部分（可多选），会按 P 号依次「下载 → 录制 → 导出」，每条生成自己的路线目录。处理中途可按「停止」中断。" />
+
+                            <DataGrid Grid.Row="1" x:Name="PartGrid" IsReadOnly="False">
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="选中" Width="52">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding Checked, UpdateSourceTrigger=PropertyChanged}"
+                                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="分P" Binding="{Binding PageLabel}" Width="60"
+                                                        IsReadOnly="True" />
+                                    <DataGridTextColumn Header="标题" Binding="{Binding Title}" Width="*"
+                                                        IsReadOnly="True" />
+                                    <DataGridTextColumn Header="时长" Binding="{Binding DurationText}" Width="80"
+                                                        IsReadOnly="True" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <WrapPanel Grid.Row="2" Margin="0,6,0,0">
+                                <Button x:Name="BtnBatchQuery" Content="查询分P" Click="OnBatchQueryClick" />
+                                <Button x:Name="BtnBatchAll" Content="全选" Click="OnBatchAllClick" />
+                                <Button x:Name="BtnBatchNone" Content="全不选" Click="OnBatchNoneClick" />
+                                <Button x:Name="BtnBatchStart" Content="依次处理选中"
+                                        Click="OnBatchStartClick" Style="{StaticResource PrimaryButton}" />
+                                <Button x:Name="BtnBatchStop" Content="停止批量" Click="OnBatchStopClick"
+                                        IsEnabled="False" />
+                                <TextBlock x:Name="TxtBatchCount" VerticalAlignment="Center"
+                                           Margin="10,0,0,0" FontSize="11"
+                                           Foreground="{StaticResource Muted}" Text="" />
+                            </WrapPanel>
+
+                            <TextBlock Grid.Row="3" x:Name="TxtBatchStatus" TextWrapping="Wrap"
+                                       Margin="0,6,0,0" FontSize="11"
+                                       Foreground="{StaticResource Muted}"
+                                       Text="把合集链接粘到上方「视频链接」，然后点「查询分P」" />
+                        </Grid>
+                    </TabItem>
                     <!-- ===== 日志 ===== -->
                     <TabItem Header="日志">
                         <DockPanel Margin="8">

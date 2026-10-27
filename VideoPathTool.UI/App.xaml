@@ -110,6 +110,11 @@
             <Setter Property="CanUserAddRows" Value="False" />
             <Setter Property="CanUserDeleteRows" Value="False" />
             <Setter Property="SelectionMode" Value="Extended" />
+            <!-- 行高一并定死：默认高度下复选框和下拉框会贴边，读起来挤 -->
+            <Setter Property="RowHeight" Value="26" />
+            <Setter Property="AlternatingRowBackground" Value="#F8FAFC" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="Background" Value="White" />
         </Style>
 
     </Application.Resources>
