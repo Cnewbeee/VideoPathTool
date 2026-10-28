@@ -331,6 +331,10 @@ public partial class MainWindow : Window
     // 比记录"每一步做了什么"简单得多，也不会因为漏记某个操作而错乱。
     private readonly Stack<List<WaypointRow>> _undoStack = new();
     private bool _inDragSnapshot;
+
+    // 上一次已确认的点位表。改下拉框/输入框时事件在值已经变了之后才来，
+    // 只有它才是改动前的状态。
+    private List<WaypointRow> _committed = new();
     private bool _restoring;
     private bool _waypointsEdited;
     private BitmapSource? _mapImage;
@@ -3045,6 +3049,12 @@ public partial class MainWindow : Window
                 _waypointRows.Add(row);
             }
         }
+        _undoStack.Clear();
+        if (BtnUndo is not null)
+        {
+            BtnUndo.IsEnabled = false;
+        }
+        MarkCommitted();
         UpdateWaypointHint();
         RefreshMap(fit: true);
     }
@@ -3084,34 +3094,72 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Stores the current table so the next edit can be undone.</summary>
+    private List<WaypointRow> SnapshotRows() => _waypointRows.Select(r => r.Copy()).ToList();
+
+    /// <summary>Records the state before a direct mutation (add / delete / menu).</summary>
+    private void Checkpoint()
+    {
+        if (_restoring)
+        {
+            return;
+        }
+        var now = SnapshotRows();
+        if (_undoStack.Count == 0 || !SameWaypoints(_undoStack.Peek(), now))
+        {
+            _undoStack.Push(now);
+            TrimUndo();
+        }
+        _committed = now;
+        if (BtnUndo is not null)
+        {
+            BtnUndo.IsEnabled = true;
+        }
+    }
+
+    /// <summary>Remembers the current table as the new baseline, without pushing.</summary>
+    private void MarkCommitted()
+    {
+        _committed = SnapshotRows();
+    }
+
+    /// <summary>
+    /// Reached from PropertyChanged, where the new value is already in place, so
+    /// the state to record is the previous baseline - not the current rows.
+    /// </summary>
     private void PushUndo()
     {
         if (_restoring)
         {
             return;
         }
-        var snapshot = _waypointRows.Select(r => r.Copy()).ToList();
-        // 绑定回写、重新编号之类的"假修改"会产生和栈顶一模一样的快照，
-        // 不去重的话撤销栈会被噪声灌满，按一次 Ctrl+Z 能连撤十几次。
-        if (_undoStack.Count > 0 && SameWaypoints(_undoStack.Peek(), snapshot))
+        var now = SnapshotRows();
+        if (SameWaypoints(_committed, now))
         {
             return;
         }
-        _undoStack.Push(snapshot);
-        while (_undoStack.Count > 60)
+        if (_undoStack.Count == 0 || !SameWaypoints(_undoStack.Peek(), _committed))
         {
-            // Drop the oldest: a Stack cannot trim from the bottom directly.
-            var keep = _undoStack.Take(60).Reverse().ToList();
-            _undoStack.Clear();
-            foreach (var entry in keep)
-            {
-                _undoStack.Push(entry);
-            }
-            break;
+            _undoStack.Push(_committed);
+            TrimUndo();
         }
+        _committed = now;
         if (BtnUndo is not null)
         {
             BtnUndo.IsEnabled = true;
+        }
+    }
+
+    private void TrimUndo()
+    {
+        if (_undoStack.Count <= 60)
+        {
+            return;
+        }
+        var keep = _undoStack.Take(60).Reverse().ToList();
+        _undoStack.Clear();
+        foreach (var entry in keep)
+        {
+            _undoStack.Push(entry);
         }
     }
 
@@ -3175,9 +3223,12 @@ public partial class MainWindow : Window
             _waypointRows.Clear();
             foreach (var row in snapshot)
             {
-                row.PropertyChanged += OnWaypointRowChanged;
-                _waypointRows.Add(row);
+                // 存进表里的是副本：快照还会留在栈/基线里，不能被后续编辑改掉。
+                var copy = row.Copy();
+                copy.PropertyChanged += OnWaypointRowChanged;
+                _waypointRows.Add(copy);
             }
+            MarkCommitted();
             RenumberWaypoints();
             _waypointsEdited = true;
             UpdateWaypointHint();
@@ -3235,8 +3286,9 @@ public partial class MainWindow : Window
             Info("请先在表格里选中要删除的点位");
             return;
         }
-        PushUndo();
+        Checkpoint();
         _waypointRows.Remove(row);
+        MarkCommitted();
         RenumberWaypoints();
         _waypointsEdited = true;
         UpdateWaypointHint();
@@ -3429,7 +3481,7 @@ public partial class MainWindow : Window
     {
         if (!_inDragSnapshot)
         {
-            PushUndo();
+            Checkpoint();
         }
         _inDragSnapshot = true;
         if (index < 0 || index >= _waypointRows.Count)
@@ -3450,6 +3502,7 @@ public partial class MainWindow : Window
         }
         var row = _waypointRows[index];
         _inDragSnapshot = false;
+        MarkCommitted();
         _waypointsEdited = true;
         UpdateWaypointHint();
         RefreshMap(fit: false);
@@ -3494,8 +3547,9 @@ public partial class MainWindow : Window
             var delete = new MenuItem { Header = "删除此点" };
             delete.Click += (_, _) =>
             {
-                PushUndo();
+                Checkpoint();
                 _waypointRows.Remove(row);
+                MarkCommitted();
                 RenumberWaypoints();
                 _waypointsEdited = true;
                 UpdateWaypointHint();
@@ -3564,8 +3618,9 @@ public partial class MainWindow : Window
             var chosen = code;
             item.Click += (_, _) =>
             {
-                PushUndo();
+                Checkpoint();
                 apply(chosen);
+                MarkCommitted();
                 _waypointsEdited = true;
                 UpdateWaypointHint();
                 RefreshMap(fit: false);
@@ -3585,7 +3640,7 @@ public partial class MainWindow : Window
             Type = "path",
             MoveMode = _cfg.MoveMode
         };
-        PushUndo();
+        Checkpoint();
         row.PropertyChanged += OnWaypointRowChanged;
 
         if (afterIndex >= 0 && afterIndex < _waypointRows.Count)
@@ -3596,6 +3651,7 @@ public partial class MainWindow : Window
         {
             _waypointRows.Add(row);
         }
+        MarkCommitted();
         RenumberWaypoints();
         _waypointsEdited = true;
         UpdateWaypointHint();
