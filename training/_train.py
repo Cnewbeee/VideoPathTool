@@ -6,6 +6,7 @@ worker processes on Windows, which used to overwrite the results of a
 concurrent run).
 """
 from _paths import data  # 数据根目录，见 training/README.md
+import _progress
 import os, time, argparse
 os.environ['YOLO_VERBOSE'] = '0'
 
@@ -26,6 +27,7 @@ def main():
     print('training from %s, workers=%d, batch=%d' % (
         base, args.workers, args.batch), flush=True)
     model = YOLO(base)
+    _progress.attach(model, args.name)
     t0 = time.time()
     model.train(
         data=args.data,

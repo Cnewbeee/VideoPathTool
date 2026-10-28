@@ -600,6 +600,11 @@
                         </Grid>
                     </TabItem>
 
+                    <!-- ===== 训练监控 ===== -->
+                    <TabItem Header="训练">
+                        <local:TrainingMonitor x:Name="TrainPage" />
+                    </TabItem>
+
                     <!-- ===== 点位操作 ===== -->
                     <TabItem Header="点位操作">
                         <Grid Margin="14,12,14,12">
