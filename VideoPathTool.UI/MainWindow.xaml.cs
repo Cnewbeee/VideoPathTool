@@ -3404,6 +3404,12 @@ public partial class MainWindow : Window
         {
             return;
         }
+        if (PointEditor is not null)
+        {
+            PointEditor.DataContext = row;
+            PointEditor.Visibility = row is null ? Visibility.Collapsed : Visibility.Visible;
+        }
+
         if (row is null)
         {
             ShotMinimap.Source = null;
@@ -3705,6 +3711,19 @@ public partial class MainWindow : Window
         UpdateWaypointHint();
         RefreshMap(fit: false);
         AppendLog($"新增点位 ({row.X:F1}, {row.Y:F1})，点「重新导出」生效");
+    }
+
+    /// <summary>Jumps the player to the selected point's moment.</summary>
+    private void OnSeekPointFrameClick(object sender, RoutedEventArgs e)
+    {
+        if (WaypointGrid.SelectedItem is not WaypointRow row)
+        {
+            Info("先选中一个点位");
+            return;
+        }
+        Tabs.SelectedIndex = VideoTabIndex;
+        SeekTo(row.TimeSec);
+        Info($"跳到点位 #{row.Index} 的画面：{row.TimeSec:F1}s");
     }
 
     private void OnMapFitClick(object sender, RoutedEventArgs e)
