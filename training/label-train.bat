@@ -1,19 +1,21 @@
 @echo off
+rem Open labelme on a dataset split. Boxes are pre-drawn; only fix what is wrong.
 for %%i in ("%~dp0..") do set ROOT=%%~fi
-set PY=%ROOT%\video\.venv-yolo\Scripts\python.exe
 set LABELME=%ROOT%\video\.venv-labelme\Scripts\labelme.exe
+set PY=%ROOT%\video\.venv-yolo\Scripts\python.exe
 if not exist "%LABELME%" (
-  echo 找不到 labelme: %LABELME%
+  echo labelme not found: %LABELME%
+  echo install it with: video\.venv-labelme\Scripts\python.exe -m pip install --index-url https://pypi.org/simple labelme
   pause
   exit /b 1
 )
 
-echo 打开训练集: %ROOT%\video\yolo_ds\images\train
+echo Opening TRAIN split: %ROOT%\video\yolo_ds\images\train
 echo.
-echo   框是对的   -^> 按 D 下一张
-echo   框画错了   -^> 拖角点修正，或删掉重画
-echo   该有框没有 -^> 画矩形，标签填 glider
-echo   不该有框   -^> 删掉框（存成空 = 负样本）
-echo   改完按 Ctrl+S 保存，全部看完再运行 label-apply.bat 写回
+echo   box is good      -^> press D for next
+echo   box is wrong     -^> drag a corner, or delete and redraw
+echo   missing box      -^> draw a rectangle, label must be: glider
+echo   should have none -^> delete the box (empty = negative sample)
+echo   press Ctrl+S to save, then run label-apply.bat
 echo.
 start "" "%LABELME%" --no-sort-labels --labels glider "%ROOT%\video\yolo_ds\images\train"
