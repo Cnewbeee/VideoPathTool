@@ -3358,6 +3358,35 @@ public partial class MainWindow : Window
 
     // ---- 地图 ----
 
+    /// <summary>
+    /// Keeps the shot thumbnails in proportion to the panel width.
+    ///
+    /// The XAML heights are only a fallback: with a fixed height the images
+    /// stay the same size while the border grows, which reads as "the panel got
+    /// wider but the picture did not". Square for the minimap, 16:9 for the
+    /// frame, both capped so the pair still fits the available height.
+    /// </summary>
+    private void OnShotStackSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (ShotMinimapHost is null || ShotFrameHost is null)
+        {
+            return;
+        }
+        var width = Math.Max(40, e.NewSize.Width);
+        var available = ActualHeight - 260; // 顶部工具栏/进度条/标签等占用
+        if (available < 120)
+        {
+            available = 460;
+        }
+        var budget = Math.Max(70, available / 2 - 18);
+
+        var side = Math.Min(width, budget);
+        var frameHeight = Math.Min(width * 9.0 / 16.0, budget);
+
+        ShotMinimapHost.Height = Math.Round(side);
+        ShotFrameHost.Height = Math.Round(frameHeight);
+    }
+
     private void SyncMapSelection()
     {
         MapCanvas.SelectedIndex = WaypointGrid.SelectedIndex;

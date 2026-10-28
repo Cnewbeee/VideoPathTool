@@ -310,24 +310,31 @@
                                         Background="White" CornerRadius="4"
                                         BorderBrush="{StaticResource Line}" BorderThickness="1"
                                         Padding="8">
-                                    <StackPanel>
-                                        <TextBlock x:Name="TxtShotInfo" FontSize="11"
-                                                   Foreground="{StaticResource Muted}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   Text="选中一个点位查看截图" />
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <StackPanel x:Name="ShotStack"
+                                                    SizeChanged="OnShotStackSizeChanged">
+                                            <TextBlock x:Name="TxtShotInfo" FontSize="11"
+                                                       Foreground="{StaticResource Muted}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Text="选中一个点位查看截图" />
 
-                                        <TextBlock Text="小地图" Style="{StaticResource Caption}"
-                                                   Margin="0,8,0,3" />
-                                        <Border Background="#111827" CornerRadius="3" Height="150">
-                                            <Image x:Name="ShotMinimap" Stretch="Uniform" />
-                                        </Border>
+                                            <TextBlock Text="小地图" Style="{StaticResource Caption}"
+                                                       Margin="0,8,0,3" />
+                                            <!-- 高度由代码按宽度算，跟着分隔条等比缩放 -->
+                                            <Border x:Name="ShotMinimapHost" Background="#111827"
+                                                    CornerRadius="3" Height="150">
+                                                <Image x:Name="ShotMinimap" Stretch="Uniform" />
+                                            </Border>
 
-                                        <TextBlock Text="视频画面" Style="{StaticResource Caption}"
-                                                   Margin="0,8,0,3" />
-                                        <Border Background="#111827" CornerRadius="3" Height="146">
-                                            <Image x:Name="ShotFrame" Stretch="Uniform" />
-                                        </Border>
-                                    </StackPanel>
+                                            <TextBlock Text="视频画面" Style="{StaticResource Caption}"
+                                                       Margin="0,8,0,3" />
+                                            <Border x:Name="ShotFrameHost" Background="#111827"
+                                                    CornerRadius="3" Height="84">
+                                                <Image x:Name="ShotFrame" Stretch="Uniform" />
+                                            </Border>
+                                        </StackPanel>
+                                    </ScrollViewer>
                                 </Border>
                             </Grid>
 
