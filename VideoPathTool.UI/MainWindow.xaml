@@ -272,7 +272,7 @@
 
                             <TextBlock Grid.Row="2" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
                                        Foreground="{StaticResource Muted}"
-                                       Text="滚轮缩放 · 拖动平移 · 单击标记选中对应点位 · 双击把选中点位挪到该处。坐标换算与 BetterGI 地图层一致（原点 4096,3072，1 像素 = 4 游戏单位）。" />
+                                       Text="拖动标记即可移动点位 · 右键标记改类型/移动/动作或删除 · 右键空白处在此新增点位 · 滚轮缩放 · 拖动空白处平移。坐标换算与 BetterGI 地图层一致（原点 4096,3072，1 像素 = 4 游戏单位）。" />
                         </Grid>
                     </TabItem>
                     <!-- ===== 视频与标定 ===== -->

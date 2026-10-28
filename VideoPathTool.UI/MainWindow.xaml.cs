@@ -392,6 +392,9 @@ public partial class MainWindow : Window
         WaypointGrid.SelectionChanged += (_, _) => SyncMapSelection();
         MapCanvas.PointClicked += OnMapPointClicked;
         MapCanvas.MapDoubleClicked += OnMapDoubleClicked;
+        MapCanvas.PointDragged += OnMapPointDragged;
+        MapCanvas.PointDragCompleted += OnMapPointDragCompleted;
+        MapCanvas.MarkerRightClicked += OnMapMarkerRightClicked;
 
         ActionGrid.ItemsSource = _actionRows;
         _actionRows.CollectionChanged += (_, _) =>
@@ -3124,6 +3127,176 @@ public partial class MainWindow : Window
         Info($"点位 #{row.Index} 移到 ({row.X:F1}, {row.Y:F1})，点「重新导出」生效");
     }
 
+    /// <summary>Live update while a marker is dragged: the row follows the mouse.</summary>
+    private void OnMapPointDragged(int index, Point mapPixel)
+    {
+        if (index < 0 || index >= _waypointRows.Count)
+        {
+            return;
+        }
+        var (gx, gy) = MapView.ToGameCoord(mapPixel);
+        var row = _waypointRows[index];
+        row.X = Math.Round(gx, 1);
+        row.Y = Math.Round(gy, 1);
+    }
+
+    private void OnMapPointDragCompleted(int index)
+    {
+        if (index < 0 || index >= _waypointRows.Count)
+        {
+            return;
+        }
+        var row = _waypointRows[index];
+        _waypointsEdited = true;
+        UpdateWaypointHint();
+        RefreshMap(fit: false);
+        AppendLog($"点位 #{row.Index} 拖到 ({row.X:F1}, {row.Y:F1})，点「重新导出」生效");
+    }
+
+    /// <summary>
+    /// Right click on the map: a marker gets its own menu (type / movement /
+    /// action / delete), empty space offers to insert a new point right there.
+    /// </summary>
+    private void OnMapMarkerRightClicked(int index, Point mapPixel)
+    {
+        var menu = new ContextMenu();
+
+        if (index >= 0 && index < _waypointRows.Count)
+        {
+            var row = _waypointRows[index];
+            WaypointGrid.SelectedIndex = index;
+            SyncMapSelection();
+
+            menu.Items.Add(new MenuItem
+            {
+                Header = $"#{row.Index}   ({row.X:F1}, {row.Y:F1})",
+                IsEnabled = false
+            });
+            menu.Items.Add(new Separator());
+
+            menu.Items.Add(BuildChoiceMenu("点位类型", TypeOptions, () => row.Type, v => row.Type = v));
+            menu.Items.Add(BuildChoiceMenu("移动模式", MoveModeOptions, () => row.MoveMode, v => row.MoveMode = v));
+            menu.Items.Add(BuildChoiceMenu("动作", ActionOptions, () => row.Action, v => row.Action = v));
+
+            var jump = new MenuItem { Header = "跳到该点的画面" };
+            jump.Click += (_, _) => OnWaypointGridDoubleClick(this, null!);
+            menu.Items.Add(jump);
+
+            var insert = new MenuItem { Header = "在其后插入一个点" };
+            var (gx, gy) = MapView.ToGameCoord(mapPixel);
+            insert.Click += (_, _) => AddWaypoint(gx, gy, index);
+            menu.Items.Add(insert);
+
+            menu.Items.Add(new Separator());
+            var delete = new MenuItem { Header = "删除此点" };
+            delete.Click += (_, _) =>
+            {
+                _waypointRows.Remove(row);
+                RenumberWaypoints();
+                _waypointsEdited = true;
+                UpdateWaypointHint();
+                RefreshMap(fit: false);
+                AppendLog($"已删除点位 #{row.Index}，点「重新导出」生效");
+            };
+            menu.Items.Add(delete);
+        }
+        else
+        {
+            var (gx, gy) = MapView.ToGameCoord(mapPixel);
+            var add = new MenuItem { Header = $"在此添加点位 ({gx:F0}, {gy:F0})" };
+            add.Click += (_, _) => AddWaypoint(gx, gy, _waypointRows.Count - 1);
+            menu.Items.Add(add);
+
+            if (WaypointGrid.SelectedIndex >= 0)
+            {
+                var after = new MenuItem { Header = $"插入到 #{WaypointGrid.SelectedIndex + 1} 之后" };
+                after.Click += (_, _) => AddWaypoint(gx, gy, WaypointGrid.SelectedIndex);
+                menu.Items.Add(after);
+            }
+
+            menu.Items.Add(new Separator());
+            var fit = new MenuItem { Header = "适应路线" };
+            fit.Click += (_, _) => OnMapFitClick(this, null!);
+            menu.Items.Add(fit);
+        }
+
+        menu.PlacementTarget = MapCanvas;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Builds a checkable submenu from one of the option catalogues.</summary>
+    private MenuItem BuildChoiceMenu<T>(string header, IReadOnlyList<T> options,
+        Func<string?> current, Action<string> apply)
+    {
+        var menu = new MenuItem { Header = header };
+        var now = current() ?? "";
+        foreach (var option in options)
+        {
+            var code = option switch
+            {
+                ActionOption a => a.Code,
+                WaypointTypeOption t => t.Code,
+                MoveModeOption m => m.Code,
+                _ => null
+            };
+            var label = option switch
+            {
+                ActionOption a => a.Label,
+                WaypointTypeOption t => t.Label,
+                MoveModeOption m => m.Label,
+                _ => code
+            };
+            if (code is null)
+            {
+                continue;
+            }
+            var item = new MenuItem
+            {
+                Header = label,
+                IsCheckable = true,
+                IsChecked = string.Equals(code, now, StringComparison.Ordinal)
+            };
+            var chosen = code;
+            item.Click += (_, _) =>
+            {
+                apply(chosen);
+                _waypointsEdited = true;
+                UpdateWaypointHint();
+                RefreshMap(fit: false);
+            };
+            menu.Items.Add(item);
+        }
+        return menu;
+    }
+
+    /// <summary>Inserts a new waypoint, optionally right after <paramref name="afterIndex"/>.</summary>
+    private void AddWaypoint(double gameX, double gameY, int afterIndex)
+    {
+        var row = new WaypointRow
+        {
+            X = Math.Round(gameX, 1),
+            Y = Math.Round(gameY, 1),
+            Type = "path",
+            MoveMode = _cfg.MoveMode
+        };
+        row.PropertyChanged += OnWaypointRowChanged;
+
+        if (afterIndex >= 0 && afterIndex < _waypointRows.Count)
+        {
+            _waypointRows.Insert(afterIndex + 1, row);
+        }
+        else
+        {
+            _waypointRows.Add(row);
+        }
+        RenumberWaypoints();
+        _waypointsEdited = true;
+        UpdateWaypointHint();
+        RefreshMap(fit: false);
+        AppendLog($"新增点位 ({row.X:F1}, {row.Y:F1})，点「重新导出」生效");
+    }
+
     private void OnMapFitClick(object sender, RoutedEventArgs e)
     {
         MapCanvas.FitToRoute();
@@ -3157,7 +3330,7 @@ public partial class MainWindow : Window
 
         TxtMapInfo.Text = points.Count == 0
             ? (_mapImage is null ? "未找到地图图片" : "还没有路径点")
-            : $"{points.Count} 个路径点 · {(_mapImage is null ? "无底图" : "提瓦特地图")} · 缩放 ×{MapCanvas.ZoomFactor:F1}";
+            : $"{points.Count} 个路径点 · {(_mapImage is null ? "无底图" : "提瓦特地图")} · 缩放 ×{MapCanvas.ZoomFactor:F1}" +( _waypointsEdited ? " · 已修改，点「重新导出」保存" : "");
 
         if (fit && points.Count > 0 && !_mapFitted)
         {

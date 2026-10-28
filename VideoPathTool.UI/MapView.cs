@@ -32,9 +32,13 @@ public sealed class MapView : FrameworkElement
     private BitmapSource? _map;
     private double _scale = 0.15;
     private Vector _offset;
-    private bool _dragging;
+    private bool _panning;
     private Point _dragStart;
     private Vector _dragOrigin;
+
+    /// <summary>Index of the marker being dragged, or -1.</summary>
+    private int _dragIndex = -1;
+    private bool _dragMoved;
 
     public MapView()
     {
@@ -59,6 +63,18 @@ public sealed class MapView : FrameworkElement
 
     /// <summary>Raised on double click with the clicked position in map pixels.</summary>
     public event Action<Point>? MapDoubleClicked;
+
+    /// <summary>Raised while a marker is dragged, with its new map position.</summary>
+    public event Action<int, Point>? PointDragged;
+
+    /// <summary>Raised when a marker drag finishes.</summary>
+    public event Action<int>? PointDragCompleted;
+
+    /// <summary>
+    /// Raised on right click over the map: the marker index (-1 when empty space)
+    /// and the clicked position in map pixels, so the host can insert a point there.
+    /// </summary>
+    public event Action<int, Point>? MarkerRightClicked;
 
     /// <summary>Converts a BetterGI game coordinate to a position in the map image.</summary>
     public static Point ToMapPixel(double gameX, double gameY) =>
@@ -186,13 +202,18 @@ public sealed class MapView : FrameworkElement
         var hit = HitTestPoint(ToMapSpace(e.GetPosition(this)));
         if (hit >= 0)
         {
+            // 按住标记 = 拖动这个点位；松手才落点。
+            _dragIndex = hit;
+            _dragMoved = false;
             PointClicked?.Invoke(hit);
+            CaptureMouse();
+            Cursor = Cursors.SizeAll;
             e.Handled = true;
             return;
         }
 
         // Empty space: start panning.
-        _dragging = true;
+        _panning = true;
         _dragStart = e.GetPosition(this);
         _dragOrigin = _offset;
         CaptureMouse();
@@ -202,7 +223,13 @@ public sealed class MapView : FrameworkElement
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        if (!_dragging)
+        if (_dragIndex >= 0)
+        {
+            _dragMoved = true;
+            PointDragged?.Invoke(_dragIndex, ToMapSpace(e.GetPosition(this)));
+            return;
+        }
+        if (!_panning)
         {
             return;
         }
@@ -213,11 +240,27 @@ public sealed class MapView : FrameworkElement
 
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
-        if (!_dragging)
+        if (_dragIndex >= 0)
+        {
+            var index = _dragIndex;
+            var moved = _dragMoved;
+            _dragIndex = -1;
+            _dragMoved = false;
+            ReleaseMouseCapture();
+            Cursor = Cursors.Hand;
+            if (moved)
+            {
+                PointDragCompleted?.Invoke(index);
+            }
+            e.Handled = true;
+            return;
+        }
+
+        if (!_panning)
         {
             return;
         }
-        _dragging = false;
+        _panning = false;
         ReleaseMouseCapture();
         Cursor = Cursors.Hand;
 
@@ -227,6 +270,21 @@ public sealed class MapView : FrameworkElement
         {
             PointClicked?.Invoke(-1);
         }
+    }
+
+    protected override void OnMouseRightButtonDown(MouseButtonEventArgs e)
+    {
+        Focus();
+        // 只吞掉事件：菜单留到抬起时再开。按下时就 IsOpen = true 的话，
+        // 紧接着的抬起会被当成"点到了别处"，菜单一闪就没了。
+        e.Handled = true;
+    }
+
+    protected override void OnMouseRightButtonUp(MouseButtonEventArgs e)
+    {
+        var mapPoint = ToMapSpace(e.GetPosition(this));
+        MarkerRightClicked?.Invoke(HitTestPoint(mapPoint), mapPoint);
+        e.Handled = true;
     }
 
     /// <summary>Index of the marker nearest to a map-space position, or -1.</summary>
