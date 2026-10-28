@@ -43,6 +43,9 @@
                         <Button x:Name="BtnMiniPreview" Content="监控小窗" Click="OnMiniPreviewClick"
                                 ToolTip="开一个小窗口，边录制边看视频走到哪一帧，方便对着攻略看" />
                         <Separator Margin="8,0" />
+                        <Button x:Name="BtnSave" Content="保存" Click="OnSaveClick"
+                                Style="{StaticResource PrimaryButton}"
+                                ToolTip="把当前点位表写入 JSON 并保存标注（Ctrl+S）；不会重新生成路径点" />
                         <Button x:Name="BtnExport" Content="重新导出" Click="OnExportClick"
                                 ToolTip="用当前滑翔窗口、点位操作与简化参数重新生成 JSON（瞬时完成）" />
                         <Button x:Name="BtnExportTo" Content="导出到…" Click="OnExportToClick"

@@ -602,6 +602,7 @@ public partial class MainWindow : Window
         BtnStop.IsEnabled = busy;
         BtnRescan.IsEnabled = !busy && hasResult;
         BtnExport.IsEnabled = !busy && hasResult;
+        BtnSave.IsEnabled = !busy && hasResult;
         BtnExportTo.IsEnabled = !busy && hasResult;
         BtnDownload.IsEnabled = !busy;
         BtnLoadCsv.IsEnabled = !busy;
@@ -797,6 +798,66 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             Info("导出失败: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Writes the current point table to the route JSON right away.
+    ///
+    /// 重新导出 rebuilds the waypoints from the glide windows and point actions;
+    /// this button instead takes the table as it stands, which is what someone
+    /// means after dragging a marker or typing a coordinate. The click itself is
+    /// the confirmation, so no extra dialog.
+    /// </summary>
+    private void OnSaveClick(object sender, RoutedEventArgs e)
+    {
+        if (_scheduler.IsBusy)
+        {
+            Info("任务运行中，请先停止或等待完成");
+            return;
+        }
+        var result = _scheduler.LastResult;
+        if (result is null)
+        {
+            Info("还没有录制结果，无法保存");
+            return;
+        }
+
+        try
+        {
+            // 标注（滑翔窗口 / 点位操作）先落盘，避免"点了保存但标注没存"。
+            _projectDirty = true;
+            SaveActions();
+
+            using var pipeline = new RecordingPipeline(_cfg, AppendLog);
+            if (_waypointsEdited)
+            {
+                result.Waypoints = _waypointRows.Select(r => r.ToPoint()).ToList();
+            }
+            else
+            {
+                var windows = _glideRows.Where(r => r.Enabled).Select(r => r.ToSegment()).ToList();
+                var actions = _actionRows.Where(r => r.Enabled).Select(r => r.ToAction()).ToList();
+                pipeline.BuildWaypoints(result, windows, actions);
+                result.Glides = windows;
+                result.Actions = actions;
+            }
+
+            pipeline.SaveJson(result);
+            _undoStack.Clear();
+            if (BtnUndo is not null)
+            {
+                BtnUndo.IsEnabled = false;
+            }
+            RefreshStats(result);
+            RefreshMap(fit: false);
+            UpdateActionSummary(result.ActionBindings);
+            UpdateButtons(_scheduler.State);
+            Info($"已保存 {result.Waypoints.Count} 个路径点 → {Path.GetFileName(result.OutputPath)}");
+        }
+        catch (Exception ex)
+        {
+            Info("保存失败: " + ex.Message);
         }
     }
 
@@ -2845,6 +2906,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Ctrl+S 保存：先把标注落盘，再写 JSON。
+        if (e.Key == Key.S && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            OnSaveClick(this, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
         // Ctrl+Z 撤销点位修改（表格和地图共用一套快照）。
         if (e.Key == Key.Z && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
@@ -3105,6 +3174,13 @@ public partial class MainWindow : Window
             return;
         }
         var fly = _waypointRows.Count(r => r.MoveMode == "fly");
+        if (BtnSave is not null)
+        {
+            BtnSave.Content = _waypointsEdited ? "保存 •" : "保存";
+            BtnSave.ToolTip = _waypointsEdited
+                ? "有未保存的点位修改（Ctrl+S）"
+                : "把当前点位表写入 JSON 并保存标注（Ctrl+S）";
+        }
         TxtWaypointHint.Text = _waypointRows.Count == 0
             ? "尚未录制"
             : _waypointsEdited
