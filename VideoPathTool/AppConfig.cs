@@ -160,8 +160,24 @@ public class AppConfig
     /// </summary>
     public bool GlideUseYolo { get; set; } = true;
 
-    /// <summary>Confidence threshold for the YOLO glide detector.</summary>
-    public double GlideYoloScore { get; set; } = 0.30;
+    /// <summary>
+    /// Confidence threshold for the YOLO glide detector.
+    ///
+    /// Lowered from 0.30 to 0.15 after measuring on a hand-verified test set
+    /// from a video that was never trained on (Inazuma, 46 positives /
+    /// 84 negatives). The v12 model scores:
+    ///   0.30 -> P 0.933  R 0.913  (4 misses)
+    ///   0.15 -> P 0.936  R 0.957  (2 misses)
+    ///   0.10 -> P 0.939  R 1.000  (0 misses)
+    /// The false-positive count stays at 3 across the whole range -- the
+    /// detections recovered by lowering the threshold are all real glides,
+    /// they simply score lower on unfamiliar terrain. Over that same video
+    /// 0.30 -> 0.10 adds 7 s of detected gliding and only 3 extra windows,
+    /// so it does not fragment into noise. 0.15 keeps a margin below the
+    /// test set's sweet spot on purpose: those 84 negatives are a sample,
+    /// not a guarantee.
+    /// </summary>
+    public double GlideYoloScore { get; set; } = 0.15;
 
     /// <summary>
     /// Sampling rate for the YOLO glide detector, in frames per second. The
