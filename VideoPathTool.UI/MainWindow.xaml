@@ -6,7 +6,8 @@
         MinHeight="640" MinWidth="1080"
         WindowStartupLocation="CenterScreen"
         PreviewKeyDown="OnWindowPreviewKeyDown"
-        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="12">
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="12"
+        Background="#F1F5F9">
 
     <DockPanel>
 
@@ -97,7 +98,7 @@
         </Border>
 
         <!-- ============================ 主体 ============================ -->
-        <Grid Margin="8">
+        <Grid Margin="14,12,14,12">
             <!-- 右侧：进度 + 标签页 -->
             <Grid>
                 <Grid.RowDefinitions>
@@ -141,11 +142,21 @@
                     </StackPanel>
                 </Border>
 
-                <TabControl Grid.Row="1" x:Name="Tabs">
+                <TabControl Grid.Row="1" x:Name="Tabs" TabStripPlacement="Left"
+                            Background="White" BorderBrush="{StaticResource Line}"
+                            BorderThickness="1" Padding="0">
+                    <TabControl.Resources>
+                        <Style TargetType="TabPanel">
+                            <Setter Property="Width" Value="120" />
+                            <Setter Property="Background" Value="#F8FAFC" />
+                            <Setter Property="VerticalAlignment" Value="Top" />
+                            <Setter Property="Margin" Value="0,8,0,0" />
+                        </Style>
+                    </TabControl.Resources>
 
                     <!-- ===== 概览 ===== -->
                     <TabItem Header="概览">
-                        <Grid Margin="8">
+                        <Grid Margin="14,12,14,12">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -254,7 +265,7 @@
 
                     <!-- ===== 地图 ===== -->
                     <TabItem Header="地图">
-                        <Grid Margin="8">
+                        <Grid Margin="14,12,14,12">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
@@ -313,7 +324,7 @@
                     </TabItem>
                     <!-- ===== 视频与标定 ===== -->
                     <TabItem Header="视频与标定">
-                        <Grid Margin="8">
+                        <Grid Margin="14,12,14,12">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -445,7 +456,7 @@
 
                     <!-- ===== 滑翔窗口 ===== -->
                     <TabItem Header="滑翔窗口">
-                        <Grid Margin="8">
+                        <Grid Margin="14,12,14,12">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -502,7 +513,7 @@
 
                     <!-- ===== 点位操作 ===== -->
                     <TabItem Header="点位操作">
-                        <Grid Margin="8">
+                        <Grid Margin="14,12,14,12">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -587,7 +598,7 @@
 
                     <!-- ===== 合集分P ===== -->
                     <TabItem Header="合集分P">
-                        <Grid Margin="8">
+                        <Grid Margin="14,12,14,12">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
@@ -639,7 +650,7 @@
                     </TabItem>
                     <!-- ===== 日志 ===== -->
                     <TabItem Header="日志">
-                        <DockPanel Margin="8">
+                        <DockPanel Margin="14,12,14,12">
                             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
                                 <Button Content="清空" Click="OnClearLogClick" />
                                 <CheckBox x:Name="ChkAutoScroll" Content="自动滚动到底部" IsChecked="True"
@@ -655,7 +666,7 @@
 
                     <!-- ===== 参数（低频，原来的左侧常驻栏）===== -->
                     <TabItem Header="参数">
-                        <Grid Margin="8">
+                        <Grid Margin="14,12,14,12">
     <ScrollViewer x:Name="SettingsScroll" VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
                     <StackPanel x:Name="SettingsStack" Margin="0,0,4,0">

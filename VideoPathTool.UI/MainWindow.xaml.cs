@@ -418,6 +418,15 @@ public partial class MainWindow : Window
         MapCanvas.PointDragged += OnMapPointDragged;
         MapCanvas.PointDragCompleted += OnMapPointDragCompleted;
         MapCanvas.MarkerRightClicked += OnMapMarkerRightClicked;
+        MapCanvas.SizeChanged += (_, _) =>
+        {
+            if (!_mapFitted && MapCanvas.ActualWidth > 0 && _waypointRows.Count > 0)
+            {
+                MapCanvas.FitToRoute();
+                _mapFitted = true;
+                RefreshMap(fit: false); // 让状态栏的缩放倍数跟上
+            }
+        };
 
         ActionGrid.ItemsSource = _actionRows;
         _actionRows.CollectionChanged += (_, _) =>
@@ -3694,7 +3703,9 @@ public partial class MainWindow : Window
             ? (_mapImage is null ? "未找到地图图片" : "还没有路径点")
             : $"{points.Count} 个路径点 · {(_mapImage is null ? "无底图" : "提瓦特地图")} · 缩放 ×{MapCanvas.ZoomFactor:F1}" +( _waypointsEdited ? " · 已修改，点「重新导出」保存" : "");
 
-        if (fit && points.Count > 0 && !_mapFitted)
+        // 标签页隐藏时 ActualWidth 是 0，FitToRoute 会直接返回；不能因此就
+        // 认为"已经适应过"，否则切过去看到的是缩到最小的整块大陆。
+        if (fit && points.Count > 0 && !_mapFitted && MapCanvas.ActualWidth > 0)
         {
             MapCanvas.FitToRoute();
             _mapFitted = true;
