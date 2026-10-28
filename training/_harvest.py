@@ -104,13 +104,21 @@ def main():
     ap.add_argument("--imgsz", type=int, default=480)
     ap.add_argument("--no-dedup", action="store_true",
                     help="关掉与已有数据集的感知查重（默认开启）")
+    ap.add_argument("--out-root", default=None,
+                    help="输出到独立的待审核目录（例如新地区），默认直接写入 yolo_ds。"
+                         "写进这里的东西不会被训练读到，审核确认后再合并")
     args = ap.parse_args()
 
     root = data("yolo_ds")
-    img_dir = os.path.join(root, "images", "train")
-    lbl_dir = os.path.join(root, "labels", "train")
+    out_root = os.path.abspath(args.out_root) if args.out_root else root
+    if os.path.normcase(out_root) == os.path.normcase(os.path.abspath(root)):
+        out_root = root
+    img_dir = os.path.join(out_root, "images", "train")
+    lbl_dir = os.path.join(out_root, "labels", "train")
     os.makedirs(img_dir, exist_ok=True)
     os.makedirs(lbl_dir, exist_ok=True)
+    if out_root != root:
+        print(f"待审核目录: {out_root}（不参与训练，确认后再合并）\n")
 
     weights = args.weights or os.path.join(
         data("output", "yolo"), "glider_v10", "weights", "best.pt")
@@ -155,9 +163,14 @@ def main():
 
     # train 和 val 都要进查重表：否则从视频里重新采到一帧跟验证集几乎一样的画面，
     # 就会把它塞进训练集，验证分数立刻虚高，而且没人看得出来。
+    # 输出到待审核目录时，正式数据集的两个分割也要一起查重。
     dedup = None
     if not args.no_dedup:
-        dedup = Dedup([img_dir, os.path.join(root, "images", "val")])
+        folders = [os.path.join(root, "images", "train"),
+                   os.path.join(root, "images", "val")]
+        if out_root != root:
+            folders.append(img_dir)
+        dedup = Dedup(folders)
 
     for vpath in pool:
         name = os.path.basename(vpath)
