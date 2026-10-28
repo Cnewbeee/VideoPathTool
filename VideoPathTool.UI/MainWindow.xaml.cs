@@ -2653,7 +2653,7 @@ public partial class MainWindow : Window
         }
 
         // 用解码器自带的时长判断"已经播到结尾"，而不是滑块的最大值：
-        // 那个值在视频还没载入时是 1，会把任何位置都判成结尾，于是一点播放就回到 0。
+        // 那个值在视频还没载入时是 1，会把任何位置都判成结尾。
         var duration = _videoDuration > 0
             ? _videoDuration
             : _playerTotalFrames / Math.Max(1e-6, _playerFps);
@@ -2663,52 +2663,62 @@ public partial class MainWindow : Window
             start = 0; // 停在结尾时再按播放，从头开始
         }
 
-        var current = _playerFrame / Math.Max(1e-6, _playerFps);
-        if (Math.Abs(start - current) > 0.25)
-        {
-            // 定位要花一个关键帧的时间，放到后台线程，界面别僵住。
-            var index = (int)Math.Clamp(
-                Math.Round(start * _playerFps), 0, Math.Max(0, _playerTotalFrames - 1));
-            _isPlaying = true;
-            BtnPlay.Content = "⏸ 暂停";
-            StatusHint("定位中…");
-            Task.Run(() =>
-            {
-                var ok = false;
-                try
-                {
-                    ok = _player.Set(VideoCaptureProperties.PosFrames, index);
-                }
-                catch
-                {
-                    ok = false;
-                }
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    if (!_isPlaying)
-                    {
-                        return;
-                    }
-                    if (!ok)
-                    {
-                        StopPlayback();
-                        StatusHint("");
-                        return;
-                    }
-                    _playerFrame = index;
-                    _playheadSec = index / Math.Max(1e-6, _playerFps);
-                    BeginPlayClock();
-                    _playTimer.Start();
-                    SyncAudio(true);
-                }));
-            });
-            return;
-        }
-
-        BeginPlayClock();
-        _playTimer.Start();
-        SyncAudio(true);
+        // 每次都把解码器定位到播放头。
+        //
+        // _playerFrame 只是我们自己的记账，拖动进度条走的是另一套解码
+        // （scrub 用独立的 capture），它并不跟着变——所以"记账接近播放头"
+        // 不等于"解码器真的在那儿"。之前靠这个判断跳过定位，结果一按播放
+        // 就从文件开头开始。H.264 副本上定位约 0.12 秒，这点代价换"一定
+        // 从当前画面开始播"是值得的。
+        var index = (int)Math.Clamp(
+            Math.Round(start * _playerFps), 0, Math.Max(0, _playerTotalFrames - 1));
+        _isPlaying = true;
         BtnPlay.Content = "⏸ 暂停";
+        StatusHint("定位中…");
+
+        Task.Run(() =>
+        {
+            var ok = false;
+            try
+            {
+                ok = _player.Set(VideoCaptureProperties.PosFrames, index);
+            }
+            catch
+            {
+                ok = false;
+            }
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!_isPlaying)
+                {
+                    return; // 定位期间被停掉了
+                }
+                // 有些解码器对 PosFrames 返回 false 但定位仍然生效，
+                // 所以失败也照播，只是退回记账位置。
+                var placed = index;
+                if (ok)
+                {
+                    try
+                    {
+                        var real = _player.Get(VideoCaptureProperties.PosFrames);
+                        if (real >= 0 && real < _playerTotalFrames)
+                        {
+                            placed = (int)Math.Round(real);
+                        }
+                    }
+                    catch
+                    {
+                        // 读不到就用请求的位置
+                    }
+                }
+                _playerFrame = placed;
+                SetPlayhead(placed / Math.Max(1e-6, _playerFps));
+                StatusHint("");
+                BeginPlayClock();
+                _playTimer.Start();
+                SyncAudio(true);
+            }));
+        });
     }
 
     /// <summary>Starts the wall clock that playback follows.</summary>

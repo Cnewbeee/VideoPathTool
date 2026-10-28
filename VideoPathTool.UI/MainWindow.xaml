@@ -282,8 +282,9 @@
 
                             <Grid Grid.Row="1">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" MinWidth="280" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="258" MinWidth="150" MaxWidth="700" />
                                 </Grid.ColumnDefinitions>
 
                                 <Border Grid.Column="0" Background="#0F172A" CornerRadius="4"
@@ -291,8 +292,21 @@
                                     <local:MapView x:Name="MapCanvas" />
                                 </Border>
 
+                                <!--
+                                  拖动这条分隔条调整地图与截图的比例。默认 258 是
+                                  试出来的折中值，但地图和截图哪个更重要因人而异，
+                                  让用户自己拖最省事。透明底不抢视线，光标会变成
+                                  左右箭头。
+                                -->
+                                <GridSplitter Grid.Column="1" Width="7"
+                                              HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                              Background="Transparent"
+                                              ResizeBehavior="PreviousAndNext" ResizeDirection="Columns"
+                                              ShowsPreview="False"
+                                              ToolTip="拖动调整地图与截图的宽度比例" />
+
                                 <!-- 选中点位时，显示录制当时的小地图与画面 -->
-                                <Border Grid.Column="1" Width="258" Margin="8,0,0,0"
+                                <Border Grid.Column="2" Margin="0"
                                         Background="White" CornerRadius="4"
                                         BorderBrush="{StaticResource Line}" BorderThickness="1"
                                         Padding="8">
