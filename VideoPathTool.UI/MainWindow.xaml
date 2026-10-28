@@ -194,6 +194,10 @@
                                 <TextBlock DockPanel.Dock="Top" Text="路径点（可直接改坐标 / 删除）"
                                            Style="{StaticResource SectionHeader}" Margin="0,0,0,4" />
                                 <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <Button x:Name="BtnUndo" Content="撤销" Click="OnUndoClick"
+                                            IsEnabled="False" ToolTip="撤销上一次点位修改（Ctrl+Z）" />
+                                    <Button Content="放弃修改" Click="OnDiscardWaypointEditsClick"
+                                            ToolTip="丢掉所有未保存的点位修改，回到上次导出的状态" />
                                     <Button Content="删除选中" Click="OnRemoveWaypointClick" />
                                     <Button Content="重建路径点" Click="OnRebuildWaypointsClick"
                                             ToolTip="按当前滑翔窗口与点位操作重新生成，会丢弃表格里的手工修改" />

@@ -118,6 +118,19 @@ public sealed class WaypointRow : INotifyPropertyChanged
         TimeSec = TimeSec
     };
 
+    /// <summary>Deep copy, used for the undo snapshots.</summary>
+    public WaypointRow Copy() => new()
+    {
+        Index = Index,
+        X = X,
+        Y = Y,
+        Type = Type,
+        MoveMode = MoveMode,
+        Action = Action,
+        ActionParams = ActionParams,
+        TimeSec = TimeSec
+    };
+
     public static WaypointRow From(ProcessedPoint p, int index) => new()
     {
         Index = index,
@@ -313,6 +326,12 @@ public partial class MainWindow : Window
     // ---- 合集批量处理 ----
     // ---- 路径点表格 / 地图 ----
     private readonly ObservableCollection<WaypointRow> _waypointRows = new();
+
+    // 撤销用快照：一次操作前存一份完整的点位表。几十个点、每份几百字节，
+    // 比记录"每一步做了什么"简单得多，也不会因为漏记某个操作而错乱。
+    private readonly Stack<List<WaypointRow>> _undoStack = new();
+    private bool _inDragSnapshot;
+    private bool _restoring;
     private bool _waypointsEdited;
     private BitmapSource? _mapImage;
     private bool _mapFitted;
@@ -721,6 +740,19 @@ public partial class MainWindow : Window
             using var pipeline = new RecordingPipeline(_cfg, AppendLog);
             var windows = _glideRows.Where(r => r.Enabled).Select(r => r.ToSegment()).ToList();
             var actions = _actionRows.Where(r => r.Enabled).Select(r => r.ToAction()).ToList();
+            if (_waypointsEdited)
+            {
+                var answer = MessageBox.Show(this,
+                    $"点位表有未保存的修改（{_waypointRows.Count} 个点）。\r\n\r\n" +
+                    "确认写入 JSON？\r\n（选「否」会留在原处，可以先继续调整或按 Ctrl+Z 撤销）",
+                    "确认导出", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (answer != MessageBoxResult.Yes)
+                {
+                    Info("已取消导出，修改仍然保留");
+                    return;
+                }
+            }
+
             List<ProcessedPoint> waypoints;
             if (_waypointsEdited)
             {
@@ -738,6 +770,11 @@ public partial class MainWindow : Window
             pipeline.SaveCsv(result);
             result.Glides = windows;
             result.Actions = actions;
+            _undoStack.Clear();
+            if (BtnUndo is not null)
+            {
+                BtnUndo.IsEnabled = false;
+            }
             RefreshStats(result);
             UpdateActionSummary(result.ActionBindings);
             UpdateButtons(_scheduler.State);
@@ -2785,6 +2822,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Ctrl+Z 撤销点位修改（表格和地图共用一套快照）。
+        if (e.Key == Key.Z && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            UndoWaypointEdit();
+            e.Handled = true;
+            return;
+        }
+
         // Escaborts a half-finished minimap selection.
         if (e.Key == Key.Escape && _selecting)
         {
@@ -3006,6 +3051,16 @@ public partial class MainWindow : Window
 
     private void OnWaypointRowChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // 重新编号会一口气改掉每一行的 Index；那是排版，不是用户修改。
+        if (e.PropertyName == nameof(WaypointRow.Index))
+        {
+            return;
+        }
+        // 拖动过程中每移动一像素都会触发，只在第一次记一份快照。
+        if (!_inDragSnapshot && !_restoring)
+        {
+            PushUndo();
+        }
         _waypointsEdited = true;
         UpdateWaypointHint();
         if (e.PropertyName is nameof(WaypointRow.X) or nameof(WaypointRow.Y) or nameof(WaypointRow.Type))
@@ -3028,6 +3083,143 @@ public partial class MainWindow : Window
                 : $"{_waypointRows.Count} 个点（含 fly {fly}）· 改坐标或删除后点「重新导出」";
     }
 
+    /// <summary>Stores the current table so the next edit can be undone.</summary>
+    private void PushUndo()
+    {
+        if (_restoring)
+        {
+            return;
+        }
+        var snapshot = _waypointRows.Select(r => r.Copy()).ToList();
+        // 绑定回写、重新编号之类的"假修改"会产生和栈顶一模一样的快照，
+        // 不去重的话撤销栈会被噪声灌满，按一次 Ctrl+Z 能连撤十几次。
+        if (_undoStack.Count > 0 && SameWaypoints(_undoStack.Peek(), snapshot))
+        {
+            return;
+        }
+        _undoStack.Push(snapshot);
+        while (_undoStack.Count > 60)
+        {
+            // Drop the oldest: a Stack cannot trim from the bottom directly.
+            var keep = _undoStack.Take(60).Reverse().ToList();
+            _undoStack.Clear();
+            foreach (var entry in keep)
+            {
+                _undoStack.Push(entry);
+            }
+            break;
+        }
+        if (BtnUndo is not null)
+        {
+            BtnUndo.IsEnabled = true;
+        }
+    }
+
+    private static bool SameWaypoints(List<WaypointRow> a, List<WaypointRow> b)
+    {
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (a[i].X != b[i].X || a[i].Y != b[i].Y ||
+                a[i].Type != b[i].Type || a[i].MoveMode != b[i].MoveMode ||
+                a[i].Action != b[i].Action || a[i].ActionParams != b[i].ActionParams ||
+                a[i].Index != b[i].Index)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Pops until the snapshot differs from what is on screen. Returns null when
+    /// every remaining snapshot is identical to the current state.
+    /// </summary>
+    private List<WaypointRow>? PopDifferentSnapshot()
+    {
+        var current = _waypointRows.ToList();
+        while (_undoStack.Count > 0)
+        {
+            var candidate = _undoStack.Pop();
+            if (!SameWaypoints(candidate, current))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private void OnUndoClick(object sender, RoutedEventArgs e) => UndoWaypointEdit();
+
+    private void UndoWaypointEdit()
+    {
+        // 栈顶可能和当前状态一模一样（绑定回写会记下重复快照）。那种快照
+        // 撤销下去画面纹丝不动，用户只会以为按钮坏了——所以一路跳过，
+        // 直到找到真正不同的那一步。
+        var snapshot = PopDifferentSnapshot();
+        if (snapshot is null)
+        {
+            Info("没有可撤销的点位修改");
+            if (BtnUndo is not null)
+            {
+                BtnUndo.IsEnabled = _undoStack.Count > 0;
+            }
+            return;
+        }
+        _restoring = true;
+        try
+        {
+            _waypointRows.Clear();
+            foreach (var row in snapshot)
+            {
+                row.PropertyChanged += OnWaypointRowChanged;
+                _waypointRows.Add(row);
+            }
+            RenumberWaypoints();
+            _waypointsEdited = true;
+            UpdateWaypointHint();
+            RefreshMap(fit: false);
+            AppendLog("已撤销上一次点位修改");
+        }
+        finally
+        {
+            _restoring = false;
+            BtnUndo.IsEnabled = _undoStack.Count > 0;
+        }
+    }
+
+    /// <summary>Drops every pending edit and reloads the exported waypoints.</summary>
+    private void OnDiscardWaypointEditsClick(object sender, RoutedEventArgs e)
+    {
+        var result = _scheduler.LastResult;
+        if (result is null)
+        {
+            return;
+        }
+        if (!_waypointsEdited)
+        {
+            Info("没有未保存的点位修改");
+            return;
+        }
+        var answer = MessageBox.Show(this,
+            "放弃所有未保存的点位修改，回到上次导出的状态？", "放弃修改",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes)
+        {
+            return;
+        }
+        _undoStack.Clear();
+        if (BtnUndo is not null)
+        {
+            BtnUndo.IsEnabled = false;
+        }
+        RefreshWaypoints(result);
+        AppendLog("已放弃未保存的点位修改");
+    }
+
     private void RenumberWaypoints()
     {
         for (var i = 0; i < _waypointRows.Count; i++)
@@ -3043,6 +3235,7 @@ public partial class MainWindow : Window
             Info("请先在表格里选中要删除的点位");
             return;
         }
+        PushUndo();
         _waypointRows.Remove(row);
         RenumberWaypoints();
         _waypointsEdited = true;
@@ -3234,6 +3427,11 @@ public partial class MainWindow : Window
     /// <summary>Live update while a marker is dragged: the row follows the mouse.</summary>
     private void OnMapPointDragged(int index, Point mapPixel)
     {
+        if (!_inDragSnapshot)
+        {
+            PushUndo();
+        }
+        _inDragSnapshot = true;
         if (index < 0 || index >= _waypointRows.Count)
         {
             return;
@@ -3251,6 +3449,7 @@ public partial class MainWindow : Window
             return;
         }
         var row = _waypointRows[index];
+        _inDragSnapshot = false;
         _waypointsEdited = true;
         UpdateWaypointHint();
         RefreshMap(fit: false);
@@ -3295,6 +3494,7 @@ public partial class MainWindow : Window
             var delete = new MenuItem { Header = "删除此点" };
             delete.Click += (_, _) =>
             {
+                PushUndo();
                 _waypointRows.Remove(row);
                 RenumberWaypoints();
                 _waypointsEdited = true;
@@ -3364,6 +3564,7 @@ public partial class MainWindow : Window
             var chosen = code;
             item.Click += (_, _) =>
             {
+                PushUndo();
                 apply(chosen);
                 _waypointsEdited = true;
                 UpdateWaypointHint();
@@ -3384,6 +3585,7 @@ public partial class MainWindow : Window
             Type = "path",
             MoveMode = _cfg.MoveMode
         };
+        PushUndo();
         row.PropertyChanged += OnWaypointRowChanged;
 
         if (afterIndex >= 0 && afterIndex < _waypointRows.Count)
