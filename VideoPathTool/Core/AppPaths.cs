@@ -94,6 +94,10 @@ public static class AppPaths
     public static string PreviewDirFor(string routeName, string? routeRoot = null)
         => Path.Combine(RouteFolderFor(routeName, routeRoot), "previews");
 
+    /// <summary>Per-sample screenshots: minimap crop and video frame.</summary>
+    public static string ShotDirFor(string routeName, string? routeRoot = null)
+        => Path.Combine(RouteFolderFor(routeName, routeRoot), "shots");
+
     // ---- video-path convenience overloads ----
 
     public static string RoutePathFor(string videoPath)

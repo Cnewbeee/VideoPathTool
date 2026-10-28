@@ -235,6 +235,18 @@ public class AppConfig
     /// <summary>Derived from <see cref="RouteDir"/> + <see cref="RouteName"/>.</summary>
     public string PreviewDir { get; set; } = "";
     public double PreviewEverySec { get; set; } = 60.0;
+
+    /// <summary>Where the per-sample screenshots live (derived).</summary>
+    public string ShotDir { get; set; } = "";
+
+    /// <summary>
+    /// Save the minimap crop and the video frame for every accepted sample, so a
+    /// waypoint can be checked against what the recorder actually saw.
+    /// </summary>
+    public bool CaptureShots { get; set; } = true;
+
+    public int ShotMinimapSize { get; set; } = 160;
+    public int ShotFrameWidth { get; set; } = 360;
     public int MaxFailedPreviews { get; set; } = 30;
     public double MinMapGrayStd { get; set; } = 22.0;
     public double MinMapLaplacianVar { get; set; } = 40.0;
@@ -287,6 +299,7 @@ public class AppConfig
         DebugCsvPath = AppPaths.DebugCsvPathFor(stem, RouteDir);
         ProjectPath = AppPaths.ProjectPathFor(stem, RouteDir);
         PreviewDir = AppPaths.PreviewDirFor(stem, RouteDir);
+        ShotDir = AppPaths.ShotDirFor(stem, RouteDir);
     }
 
     private static bool SamePath(string a, string b)

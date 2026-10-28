@@ -3098,6 +3098,110 @@ public partial class MainWindow : Window
     {
         MapCanvas.SelectedIndex = WaypointGrid.SelectedIndex;
         MapCanvas.InvalidateVisual();
+        ShowShotFor(WaypointGrid.SelectedItem as WaypointRow);
+    }
+
+    /// <summary>
+    /// Shows the minimap crop and video frame the recorder saved for this
+    /// waypoint. The sample time is the key: shots are named m/f_&lt;ms&gt;.jpg.
+    /// </summary>
+    private void ShowShotFor(WaypointRow? row)
+    {
+        if (ShotMinimap is null || ShotFrame is null || TxtShotInfo is null)
+        {
+            return;
+        }
+        if (row is null)
+        {
+            ShotMinimap.Source = null;
+            ShotFrame.Source = null;
+            TxtShotInfo.Text = "选中一个点位查看截图";
+            return;
+        }
+
+        var dir = _cfg.ShotDir;
+        var ms = (int)Math.Round(row.TimeSec * 1000);
+        var mapPath = FindShot(dir, "m", ms);
+        var framePath = FindShot(dir, "f", ms);
+
+        ShotMinimap.Source = LoadShot(mapPath);
+        ShotFrame.Source = LoadShot(framePath);
+
+        if (mapPath is null && framePath is null)
+        {
+            TxtShotInfo.Text = $"#{row.Index} · {row.TimeSec:F2}s（这次录制没有截图）";
+        }
+        else
+        {
+            TxtShotInfo.Text = $"#{row.Index} · {row.TimeSec:F2}s · ({row.X:F0}, {row.Y:F0})";
+        }
+    }
+
+    /// <summary>
+    /// Finds the shot closest to <paramref name="ms"/>. Exact names normally
+    /// match; the nearest-time fallback covers waypoints whose TimeSec went
+    /// through rounding on the way into the JSON.
+    /// </summary>
+    private static string? FindShot(string dir, string prefix, int ms)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))
+            {
+                return null;
+            }
+            var exact = Path.Combine(dir, $"{prefix}_{ms:D8}.jpg");
+            if (File.Exists(exact))
+            {
+                return exact;
+            }
+
+            string? best = null;
+            var bestDelta = int.MaxValue;
+            foreach (var file in Directory.EnumerateFiles(dir, prefix + "_*.jpg"))
+            {
+                var stem = Path.GetFileNameWithoutExtension(file);
+                var part = stem.Length > 2 ? stem[2..] : "";
+                if (!int.TryParse(part, out var value))
+                {
+                    continue;
+                }
+                var delta = Math.Abs(value - ms);
+                if (delta < bestDelta && delta <= 2000)
+                {
+                    bestDelta = delta;
+                    best = file;
+                }
+            }
+            return best;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static BitmapSource? LoadShot(string? path)
+    {
+        if (path is null)
+        {
+            return null;
+        }
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.UriSource = new Uri(path);
+            // OnLoad so the file is not kept locked while the folder is in use.
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void OnMapPointClicked(int index)
@@ -3480,6 +3584,8 @@ public partial class MainWindow : Window
         // --- 采样与匹配 ---
         AddDouble(PanelMatch, "采样 FPS", () => _cfg.SampleFps, v => _cfg.SampleFps = Math.Clamp(v, 0.2, 30),
             "可热改：暂停后调整，继续时按新频率采样");
+        AddBool(PanelMatch, "记录点位截图", () => _cfg.CaptureShots, v => _cfg.CaptureShots = v,
+            "每个匹配成功的点存一张小地图和一张画面（routes/路线名/shots），点选点位时可回看");
         AddDouble(PanelMatch, "置信度阈值", () => _cfg.ConfidenceThreshold, v => _cfg.ConfidenceThreshold = Math.Clamp(v, 0, 1));
         AddInt(PanelMatch, "匹配 rank", () => _cfg.MatchRank, v => _cfg.MatchRank = Math.Max(1, v));
         AddBool(PanelMatch, "使用 SIFT", () => _cfg.UseSift, v => _cfg.UseSift = v);

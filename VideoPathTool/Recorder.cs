@@ -215,6 +215,7 @@ public class Recorder
                         prevTimeSec = timeSec;
                         lastAcceptedGray?.Dispose();
                         lastAcceptedGray = grayMinimap.Clone();
+                        SaveShot(timeSec, minimap, frame);
                     }
                     else
                     {
@@ -268,6 +269,48 @@ public class Recorder
         var xs = offsets.Select(o => o.X).OrderBy(v => v).ToArray();
         var ys = offsets.Select(o => o.Y).OrderBy(v => v).ToArray();
         return new Point2f(xs[xs.Length / 2], ys[ys.Length / 2]);
+    }
+
+    /// <summary>
+    /// Writes the minimap crop and a downscaled video frame for one accepted
+    /// sample. Filenames carry the timestamp in milliseconds so the editor can
+    /// find the shot for any waypoint without a lookup table.
+    ///
+    /// A failure here must never break a run: the screenshots are a convenience,
+    /// the coordinates are the product.
+    /// </summary>
+    private void SaveShot(double timeSec, Mat minimap, Mat frame)
+    {
+        if (!_cfg.CaptureShots || string.IsNullOrWhiteSpace(_cfg.ShotDir))
+        {
+            return;
+        }
+        try
+        {
+            Directory.CreateDirectory(_cfg.ShotDir);
+            var ms = (int)Math.Round(timeSec * 1000);
+            var quality = new ImageEncodingParam(ImwriteFlags.JpegQuality, 85);
+
+            var side = Math.Clamp(_cfg.ShotMinimapSize, 48, 512);
+            using (var small = new Mat())
+            {
+                Cv2.Resize(minimap, small, new OpenCvSharp.Size(side, side), 0, 0, InterpolationFlags.Area);
+                Cv2.ImWrite(Path.Combine(_cfg.ShotDir, $"m_{ms:D8}.jpg"), small, quality);
+            }
+
+            var width = Math.Clamp(_cfg.ShotFrameWidth, 120, 1280);
+            var scale = width / (double)frame.Width;
+            var height = Math.Max(1, (int)Math.Round(frame.Height * scale));
+            using (var smallFrame = new Mat())
+            {
+                Cv2.Resize(frame, smallFrame, new OpenCvSharp.Size(width, height), 0, 0, InterpolationFlags.Area);
+                Cv2.ImWrite(Path.Combine(_cfg.ShotDir, $"f_{ms:D8}.jpg"), smallFrame, quality);
+            }
+        }
+        catch
+        {
+            // Disk full / permission / racing cleanup - skip this shot.
+        }
     }
 
     private Point2f? GetMarkerOffsetCrop(Mat frame, MinimapCircle circle)
