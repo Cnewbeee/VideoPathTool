@@ -20,12 +20,17 @@ def main():
     ap.add_argument('--workers', type=int,
                     default=int(os.environ.get('YOLO_WORKERS', '0')))
     ap.add_argument('--batch', type=int, default=8)
+    ap.add_argument('--cache', default='false',
+                    choices=['false', 'ram', 'disk'],
+                    help='图片缓存。ram 把解码彻底省掉，但 train+val 全进内存，'
+                         '这套数据约 1.2 GB，内存吃紧时会开始换页反而更慢')
     args = ap.parse_args()
 
     from ultralytics import YOLO
     base = args.init or data('weights', 'yolov8n.pt')
-    print('training from %s, workers=%d, batch=%d' % (
-        base, args.workers, args.batch), flush=True)
+    cache = False if args.cache == 'false' else args.cache
+    print('training from %s, workers=%d, batch=%d, cache=%s' % (
+        base, args.workers, args.batch, cache), flush=True)
     model = YOLO(base)
     _progress.attach(model, args.name)
     t0 = time.time()
@@ -33,6 +38,7 @@ def main():
         data=args.data,
         epochs=args.epochs, imgsz=640, batch=args.batch, device=0,
         workers=args.workers,
+        cache=cache,
         project=args.project, name=args.name, exist_ok=True, verbose=False,
         seed=0, patience=60, cos_lr=True,
         lr0=0.001 if args.init else 0.01,

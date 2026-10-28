@@ -45,6 +45,52 @@ def short_code(path):
     return "v"
 
 
+def dhash(img, size=8):
+    """64 位差异哈希：缩到 9x8 灰度，比较相邻像素得到 64 个比特。
+
+    用不着更强的哈希：这里只需要回答"这张画面是不是已经收过了"。
+    同一段视频里相邻几秒的画面几乎一样，dHash 对亮度/压缩噪声不敏感，
+    但对真实的镜头变化（转视角、换场景）很敏感，正好是我们要的粒度。
+    """
+    g = cv2.cvtColor(cv2.resize(img, (size + 1, size),
+                                interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+    return np.packbits(g[:, 1:] > g[:, :-1]).tobytes()
+
+
+class Dedup:
+    """把数据集里已有图的哈希装成一张表，新帧靠汉明距离查重。
+
+    不查重的话，同一批视频跑第二遍会把上一轮已经收过的帧再收一遍 ——
+    数据集是变大了，但只是把同一张图存了两次，对泛化没有任何帮助，
+    还要多付训练时间。
+    """
+
+    def __init__(self, folders, threshold=4):
+        self.threshold = threshold
+        self.hashes = np.zeros((0, 8), np.uint8)
+        rows = []
+        for folder in folders:
+            for path in glob.glob(os.path.join(folder, "*.jpg")):
+                im = cv2.imread(path)
+                if im is not None:
+                    rows.append(np.frombuffer(dhash(im), np.uint8))
+        if rows:
+            self.hashes = np.vstack(rows)
+        print(f"查重表：{len(self.hashes)} 张已有图，阈值汉明距离 <= {threshold}"
+              f"（64 位中约 {threshold * 1.6:.0f}%）\n")
+
+    def is_dup(self, img):
+        if len(self.hashes) == 0:
+            return False
+        bits = np.unpackbits(np.frombuffer(dhash(img), np.uint8))
+        best = (bits != np.unpackbits(self.hashes, axis=1)).sum(axis=1).min()
+        return best <= self.threshold
+
+    def add(self, img):
+        self.hashes = np.vstack([self.hashes,
+                                 np.frombuffer(dhash(img), np.uint8)])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--weights", default=None)
@@ -56,6 +102,8 @@ def main():
     ap.add_argument("--max-per-video", type=int, default=25)
     ap.add_argument("--negs", type=int, default=8, help="每个视频取多少负样本")
     ap.add_argument("--imgsz", type=int, default=480)
+    ap.add_argument("--no-dedup", action="store_true",
+                    help="关掉与已有数据集的感知查重（默认开启）")
     args = ap.parse_args()
 
     root = data("yolo_ds")
@@ -105,6 +153,12 @@ def main():
     if counter:
         print(f"接续已有序号，从 auto_{counter + 1:04d} 开始\n")
 
+    # train 和 val 都要进查重表：否则从视频里重新采到一帧跟验证集几乎一样的画面，
+    # 就会把它塞进训练集，验证分数立刻虚高，而且没人看得出来。
+    dedup = None
+    if not args.no_dedup:
+        dedup = Dedup([img_dir, os.path.join(root, "images", "val")])
+
     for vpath in pool:
         name = os.path.basename(vpath)
         code = short_code(vpath)
@@ -116,12 +170,13 @@ def main():
 
         kept = 0
         negs = 0
+        dups = 0
         last_keep = -1e9
         idx = 0
         buf, buf_t = [], []
 
         def flush():
-            nonlocal kept, negs, last_keep, counter
+            nonlocal kept, negs, last_keep, counter, dups
             if not buf:
                 return
             results = model.predict(buf, conf=args.conf * 0.5, imgsz=args.imgsz,
@@ -131,6 +186,9 @@ def main():
                 conf = float(res.boxes.conf.max()) if has else 0.0
 
                 if has and conf >= args.conf and kept < args.max_per_video and t - last_keep >= args.gap:
+                    if dedup is not None and dedup.is_dup(frame):
+                        dups += 1
+                        continue
                     i = int(res.boxes.conf.argmax())
                     cx, cy, bw, bh = res.boxes.xywhn[i].cpu().numpy()
                     counter += 1
@@ -140,17 +198,24 @@ def main():
                         fh.write(f"0 {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n")
                     manifest.append({"file": stem, "video": name, "time": round(t, 2),
                                      "kind": "pos", "conf": round(conf, 3)})
+                    if dedup is not None:
+                        dedup.add(frame)
                     kept += 1
                     last_keep = t
                 elif not has and negs < args.negs:
                     # 负样本也要分散取，简单按固定间隔
                     if int(t) % 20 == 0:
+                        if dedup is not None and dedup.is_dup(frame):
+                            dups += 1
+                            continue
                         counter += 1
                         stem = f"auto_{counter:04d}_{code}"
                         cv2.imwrite(os.path.join(img_dir, stem + ".jpg"), frame)
                         open(os.path.join(lbl_dir, stem + ".txt"), "w").close()
                         manifest.append({"file": stem, "video": name, "time": round(t, 2),
                                          "kind": "neg", "conf": 0.0})
+                        if dedup is not None:
+                            dedup.add(frame)
                         negs += 1
             buf.clear()
             buf_t.clear()
@@ -167,11 +232,16 @@ def main():
             idx += 1
         flush()
         cap.release()
-        print(f"   取正样本 {kept} 张，负样本 {negs} 张")
+        print(f"   取正样本 {kept} 张，负样本 {negs} 张"
+              + (f"，跳过 {dups} 张（与已有数据重复）" if dups else ""))
 
-    with open(os.path.join(outdir, "manifest.csv"), "w", newline="", encoding="utf-8-sig") as fh:
+    # 追加而不是覆盖：分多次跑不同视频组时，上一批的来源记录不该被冲掉
+    mpath = os.path.join(outdir, "manifest.csv")
+    new_file = not os.path.exists(mpath)
+    with open(mpath, "a", newline="", encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=["file", "video", "time", "kind", "conf"])
-        w.writeheader()
+        if new_file:
+            w.writeheader()
         w.writerows(manifest)
 
     pos = sum(1 for m in manifest if m["kind"] == "pos")
