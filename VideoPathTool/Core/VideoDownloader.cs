@@ -265,12 +265,92 @@ public static class VideoDownloader
             }
         }
 
-        var name = Sanitize(info?.Title);
+        // 标题里的括号多半是补充说明（成就数、宝箱个数、合集序号），
+        // 留着会让文件夹名又长又难认。
+        var name = Sanitize(StripBrackets(info?.Title));
         if (index is > 0)
         {
             name += $"_P{index}";
         }
         return name;
+    }
+
+    /// <summary>
+    /// Drops bracketed asides from a title, brackets included.
+    ///
+    /// Handles half- and full-width round brackets, square brackets, curly
+    /// braces and the CJK corner brackets (【】), because a bilibili title
+    /// routinely uses all of them for the numbers nobody needs in a folder
+    /// name: 【原神一条龙全收集】…(成就数411/火神瞳108)…共4个(1-4).
+    ///
+    /// Scans with a stack rather than a regex: a regex matching
+    /// "open … non-closers … close" mangles nesting - "([x])" loses its
+    /// closing parenthesis - and leaves an unterminated "(" in place. The
+    /// stack gets both right, and drops an unclosed tail, which is what a
+    /// truncated title looks like.
+    /// </summary>
+    public static string StripBrackets(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder(text.Length);
+        var closers = new Stack<char>();
+        var skipping = false;
+
+        foreach (var ch in text)
+        {
+            if (TryGetCloser(ch, out var closer))
+            {
+                if (closers.Count == 0)
+                {
+                    skipping = true; // 从这里开始是要丢掉的内容
+                }
+                closers.Push(closer);
+                continue;
+            }
+
+            if (closers.Count > 0 && ch == closers.Peek())
+            {
+                closers.Pop();
+                if (closers.Count == 0)
+                {
+                    skipping = false;
+                    sb.Append(' '); // 隔开前后文，避免粘连
+                }
+                continue;
+            }
+
+            if (skipping)
+            {
+                continue;
+            }
+            sb.Append(ch);
+        }
+
+        // 不闭合的括号：它后面的一律不要（标题被截断时就是这样）
+        var result = Regex.Replace(sb.ToString(), @"\s{2,}", " ");
+        result = result.Trim(' ', '\t', '-', '_', '·', '|', '/');
+        return string.IsNullOrWhiteSpace(result) ? text.Trim() : result;
+    }
+
+    private static bool TryGetCloser(char open, out char close)
+    {
+        switch (open)
+        {
+            case '(': close = ')'; return true;
+            case '（': close = '）'; return true;
+            case '[': close = ']'; return true;
+            case '［': close = '］'; return true;
+            case '【': close = '】'; return true;
+            case '{': close = '}'; return true;
+            case '｛': close = '｝'; return true;
+            case '〈': close = '〉'; return true;
+            case '《': close = '》'; return true;
+            default: close = '\0'; return false;
+        }
     }
 
     /// <summary>
