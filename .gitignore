@@ -61,3 +61,8 @@ __pycache__/
 
 # 一次性脚本
 /_*.py
+
+# ultralytics 的验证产物
+/runs/
+/_lm.log
+/_lm.out
