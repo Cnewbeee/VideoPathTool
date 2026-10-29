@@ -163,19 +163,20 @@ public class AppConfig
     /// <summary>
     /// Confidence threshold for the YOLO glide detector.
     ///
-    /// Lowered from 0.30 to 0.15 after measuring on a hand-verified test set
-    /// from a video that was never trained on (Inazuma, 46 positives /
-    /// 84 negatives). The v12 model scores:
+    /// Lowered from 0.30 to 0.15, measured on a hand-verified test set from a
+    /// video that was never trained on (Inazuma, 46 positives / 84 negatives).
+    /// With the yolov8n model in use at the time:
     ///   0.30 -> P 0.933  R 0.913  (4 misses)
     ///   0.15 -> P 0.936  R 0.957  (2 misses)
     ///   0.10 -> P 0.939  R 1.000  (0 misses)
-    /// The false-positive count stays at 3 across the whole range -- the
+    /// The false-positive count stayed at 3 across that whole range -- the
     /// detections recovered by lowering the threshold are all real glides,
-    /// they simply score lower on unfamiliar terrain. Over that same video
-    /// 0.30 -> 0.10 adds 7 s of detected gliding and only 3 extra windows,
-    /// so it does not fragment into noise. 0.15 keeps a margin below the
-    /// test set's sweet spot on purpose: those 84 negatives are a sample,
-    /// not a guarantee.
+    /// they simply score lower on unfamiliar terrain.
+    ///
+    /// The deployed model is now yolov8s, whose scores on the same set are
+    /// flat: 0.15 and 0.10 both give P 0.978 / R 0.978 (1 FP, 1 miss).
+    /// So 0.15 is not a compromise anymore, it is simply correct -- and the
+    /// extra headroom that yolov8n needed is no longer required.
     /// </summary>
     public double GlideYoloScore { get; set; } = 0.15;
 
