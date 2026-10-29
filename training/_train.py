@@ -24,13 +24,18 @@ def main():
                     choices=['false', 'ram', 'disk'],
                     help='图片缓存。ram 把解码彻底省掉，但 train+val 全进内存，'
                          '这套数据约 1.2 GB，内存吃紧时会开始换页反而更慢')
+    ap.add_argument('--lr0', type=float, default=None,
+                    help='初始学习率。默认从 --init 推断（带 init 用 0.001 微调，'
+                         '不带用 0.01）。换骨干网络做对比实验时显式给定，'
+                         '否则学习率不同会让结果没法比')
     args = ap.parse_args()
 
     from ultralytics import YOLO
     base = args.init or data('weights', 'yolov8n.pt')
     cache = False if args.cache == 'false' else args.cache
-    print('training from %s, workers=%d, batch=%d, cache=%s' % (
-        base, args.workers, args.batch, cache), flush=True)
+    lr0 = args.lr0 if args.lr0 is not None else (0.001 if args.init else 0.01)
+    print('training from %s, workers=%d, batch=%d, cache=%s, lr0=%g' % (
+        base, args.workers, args.batch, cache, lr0), flush=True)
     model = YOLO(base)
     _progress.attach(model, args.name)
     t0 = time.time()
@@ -41,7 +46,7 @@ def main():
         cache=cache,
         project=args.project, name=args.name, exist_ok=True, verbose=False,
         seed=0, patience=60, cos_lr=True,
-        lr0=0.001 if args.init else 0.01,
+        lr0=lr0,
     )
     print('training took %.1f s' % (time.time()-t0), flush=True)
     print('weights ->', os.path.join(args.project, args.name, 'weights', 'best.pt'), flush=True)
