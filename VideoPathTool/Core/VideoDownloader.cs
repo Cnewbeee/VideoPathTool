@@ -101,6 +101,34 @@ public static class VideoDownloader
         return FindOnPath("yt-dlp.exe");
     }
 
+    /// <summary>
+    /// Points the child's TEMP at a directory we own.
+    ///
+    /// yt-dlp ships as a PyInstaller one-file bundle: before it does anything
+    /// it unpacks itself into TEMP. When the inherited TEMP is unusable -- an
+    /// 8.3 alias such as <c>C:\Users\MADALA~1\AppData\Local\Temp</c> that the
+    /// bootloader cannot create directories under is the case seen here -- every
+    /// invocation dies with "Could not create temporary directory!" before it
+    /// ever touches the network. That looks like a download failure but is
+    /// really an environment problem, so give it a folder that is known good.
+    /// </summary>
+    private static void ApplyWritableTemp(ProcessStartInfo psi)
+    {
+        try
+        {
+            var dir = AppPaths.TempDir;
+            Directory.CreateDirectory(dir);
+            psi.Environment["TEMP"] = dir;
+            psi.Environment["TMP"] = dir;
+            psi.Environment["TMPDIR"] = dir;
+        }
+        catch
+        {
+            // Could not prepare our own folder: keep the inherited env and let
+            // the caller report whatever yt-dlp says.
+        }
+    }
+
     private static string? FindOnPath(string exeName)
     {
         var path = Environment.GetEnvironmentVariable("PATH");
@@ -159,6 +187,7 @@ public static class VideoDownloader
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
+        ApplyWritableTemp(psi);
         psi.ArgumentList.Add("-J");
         psi.ArgumentList.Add("--no-playlist");
         psi.ArgumentList.Add("--no-warnings");
@@ -460,6 +489,7 @@ public static class VideoDownloader
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
+        ApplyWritableTemp(psi);
         psi.ArgumentList.Add("--newline");
         psi.ArgumentList.Add("--no-playlist");
         psi.ArgumentList.Add("--no-warnings");
@@ -646,11 +676,20 @@ public static class VideoDownloader
 
         if (proc.ExitCode != 0)
         {
+            var text = string.Join(Environment.NewLine, tail);
+            // The most common failure on Windows is not a network problem at
+            // all -- it is the PyInstaller bootloader failing to unpack itself.
+            // Say so plainly instead of leaving the raw line for the user to
+            // interpret.
+            var hint = text.Contains("temporary directory", StringComparison.OrdinalIgnoreCase)
+                ? $"yt-dlp 无法创建临时目录。它需要往 TEMP 里解包自己，已改用 {AppPaths.TempDir}，"
+                  + "如果仍然失败，请检查该目录是否可写、磁盘是否已满。"
+                : $"yt-dlp 退出码 {proc.ExitCode}";
             return new DownloadResult
             {
                 Success = false,
-                Message = $"yt-dlp 退出码 {proc.ExitCode}",
-                Tail = string.Join(Environment.NewLine, tail)
+                Message = hint,
+                Tail = text
             };
         }
 

@@ -33,6 +33,15 @@ public static class AppPaths
     /// <summary>Downloaded videos.</summary>
     public static string DownloadDir => Path.Combine(VideoRoot, "downloads");
 
+    /// <summary>
+    /// Scratch space for helper binaries. yt-dlp is a PyInstaller bundle that
+    /// unpacks itself into TEMP before it can do anything, and the inherited
+    /// TEMP is not always usable here -- it can be an 8.3 alias the bootloader
+    /// cannot create directories under, which fails every run with
+    /// "Could not create temporary directory!" before any network call.
+    /// </summary>
+    public static string TempDir => Path.Combine(VideoRoot, "tmp");
+
     /// <summary>Root that holds one folder per route.</summary>
     public static string RouteDir => Path.Combine(VideoRoot, "routes");
 
